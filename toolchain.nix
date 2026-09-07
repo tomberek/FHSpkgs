@@ -58,6 +58,85 @@ in
   mknod "$fhsroot/dev/null" c 1 3 2>/dev/null || cp /dev/null "$fhsroot/dev/null" 2>/dev/null || : > "$fhsroot/dev/null"
   chmod 666 "$fhsroot/dev/null" 2>/dev/null || true
 
+  # stageDeps(findDepthFlag, dir...) -- finds every ELF under the given
+  # directory/directories (findDepthFlag is "-maxdepth 1" to scan only
+  # that directory, or "" for unlimited recursion -- gcc-unwrapped's own
+  # tree needs the latter, since its real layout nests ELFs under
+  # libexec/gcc/<target>/<version>/; every other call site here is
+  # already flat, so recursion vs not makes no difference for those),
+  # resolves each one's real shared-library dependencies via ldd run on
+  # the ORIGINAL, unpatched binary (before any patchelf call -- a
+  # patched RPATH of /usr/lib wouldn't reflect where these libs actually
+  # live yet), and copies any dependency not already staged into
+  # $fhsroot/usr/lib. Used four times below (gcc, gcc.cc.lib, binutils,
+  # and the make/bash/coreutils/... bootstrap tool group) -- extracted
+  # here to remove that duplication; each call site passes the exact
+  # depth/directories its original standalone loop used, so this is a
+  # pure refactor, not a behavior change.
+  stageDeps() {
+    __sd_depth="$1"; shift
+    # $__sd_depth is deliberately unquoted below: it must expand to
+    # ZERO words (unlimited recursion) or TWO words ("-maxdepth 1"), not
+    # one literal string containing a space.
+    find "$@" $__sd_depth -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/stagedeps-elfs.txt
+    : > /tmp/stagedeps-libs.txt
+    while read -r origf; do
+      ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/stagedeps-libs.txt || true
+    done < /tmp/stagedeps-elfs.txt
+    sort -u /tmp/stagedeps-libs.txt > /tmp/stagedeps-libs-uniq.txt
+    while read -r lib; do
+      dest="$fhsroot/usr/lib/$(basename "$lib")"
+      [ -e "$dest" ] && continue
+      cp -aL --no-preserve=ownership "$lib" "$dest"
+    done < /tmp/stagedeps-libs-uniq.txt
+  }
+
+  # patchelfTree(dir, findArgs...) -- patchelf's every ELF found under
+  # dir (findArgs, e.g. "-maxdepth 1", scopes the search exactly like
+  # stageDeps above) to target the FHS loader + /usr/lib, skipping the
+  # loader itself (patchelf'ing ld-linux-x86-64.so.2 corrupts it
+  # fatally, confirmed via a standalone segfault repro) and issuing
+  # --set-rpath and --set-interpreter as two SEPARATE patchelf calls,
+  # not one call with both flags -- .so files have no .interp section,
+  # and combining both flags in one invocation fails the WHOLE call on
+  # those. Used four times below (gcc's own work tree, gcc.cc.lib once
+  # copied into $fhsroot/usr/lib, binutils' work tree, the bootstrap
+  # tool set's work tree) -- extracted here to remove that duplication;
+  # every caller already `chmod -R u+w`'d its own directory beforehand
+  # (unlike stageDeps' cp -aL output, which preserves the store's
+  # read-only bits and needs its own later, separate chmod sweep), so
+  # this function itself doesn't need to.
+  patchelfTree() {
+    __pt_dir="$1"; shift
+    while read -r f; do
+      case "$(basename "$f")" in
+        ld-linux-x86-64.so.2) continue ;;
+      esac
+      patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
+      patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
+    done < <(find "$__pt_dir" "$@" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null)
+  }
+
+  # writeCcWrapper(name, realBin) -- writes a /usr/bin/$name wrapper
+  # script that execs realBin with the flags plain gcc-unwrapped needs
+  # to find /usr/include and /usr/lib by default (confirmed via a real
+  # configure-probe failure with no -idirafter flag present) and to
+  # link against the FHS loader. Used for both gcc and g++ below (g++
+  # needed after a real 'compiler with support for C++17 ... is
+  # required' configure failure on patchelf, which the earlier one-off
+  # compiler probe never exercised since it only ever used plain gcc).
+  # This reimplements, minimally, the role nixpkgs' own cc-wrapper
+  # plays -- a wrapper SCRIPT we write ourselves, not a nixpkgs build
+  # artifact.
+  writeCcWrapper() {
+    __wc_name="$1"; __wc_bin="$2"
+    cat > "$fhsroot/usr/bin/$__wc_name" <<WRAP
+#!/bin/sh
+exec $__wc_bin -B/usr/lib -B/usr/bin -idirafter /usr/include -L/usr/lib -Wl,-dynamic-linker,/usr/lib/ld-linux-x86-64.so.2 -Wl,-rpath,/usr/lib "\$@"
+WRAP
+    chmod +x "$fhsroot/usr/bin/$__wc_name"
+  }
+
   # --- BOOTSTRAP: glibc headers -> /usr/include ---
   # cp -aL (not -a): glibc.dev's own include/asm, include/linux etc. are
   # themselves symlinks into a SEPARATE linux-headers store package; -aL
@@ -97,93 +176,31 @@ in
   mkdir -p "$workgcc/gcc"
   cp -a --no-preserve=ownership ${gccUnwrapped}/. "$workgcc/gcc/"
   chmod -R u+w "$workgcc/gcc"
-  while read -r f; do
-    # .so files have no .interp section; combining --set-interpreter
-    # with --set-rpath in one invocation fails the WHOLE call on those.
-    patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-    patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-  done < <(find "$workgcc/gcc" -type f -exec sh -c 'head -c4 "$1" | grep -q ELF' _ {} \; -print 2>/dev/null)
+  patchelfTree "$workgcc/gcc"
 
-  find "${gccUnwrapped}" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/gcc-elfs.txt
-  : > /tmp/gcc-deps.txt
-  while read -r origf; do
-    ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/gcc-deps.txt || true
-  done < /tmp/gcc-elfs.txt
-  sort -u /tmp/gcc-deps.txt > /tmp/gcc-deps-uniq.txt
-  while read -r lib; do
-    dest="$fhsroot/usr/lib/$(basename "$lib")"
-    [ -e "$dest" ] && continue
-    cp -aL --no-preserve=ownership "$lib" "$dest"
-  done < /tmp/gcc-deps-uniq.txt
+  stageDeps "" "${gccUnwrapped}"
   mkdir -p "$fhsroot$(dirname ${gccUnwrapped})"
   cp -a "$workgcc/gcc" "$fhsroot${gccUnwrapped}"
 
-  # gcc wrapper at /usr/bin/gcc -- plain gcc-unwrapped does NOT search
-  # /usr/include or /usr/lib by default (confirmed via a real
-  # configure-probe failure with no -idirafter flag present). This
-  # reimplements, minimally, the role nixpkgs' own cc-wrapper plays --
-  # a wrapper SCRIPT we write ourselves, not a nixpkgs build artifact.
-  cat > "$fhsroot/usr/bin/gcc" <<GCCWRAP
-#!/bin/sh
-exec ${gccUnwrapped}/bin/gcc -B/usr/lib -B/usr/bin -idirafter /usr/include -L/usr/lib -Wl,-dynamic-linker,/usr/lib/ld-linux-x86-64.so.2 -Wl,-rpath,/usr/lib "\$@"
-GCCWRAP
-  chmod +x "$fhsroot/usr/bin/gcc"
+  writeCcWrapper gcc "${gccUnwrapped}/bin/gcc"
   ln -sf "${gccUnwrapped}/bin/cpp" "$fhsroot/usr/bin/cpp"
 
-  # same wrapper for g++ -- needed by any C++ package (confirmed via a
-  # real 'compiler with support for C++17 ... is required' configure
-  # failure on patchelf, which the earlier one-off compiler probe never
-  # exercised since it only ever used plain gcc).
-  cat > "$fhsroot/usr/bin/g++" <<GXXWRAP
-#!/bin/sh
-exec ${gccUnwrapped}/bin/g++ -B/usr/lib -B/usr/bin -idirafter /usr/include -L/usr/lib -Wl,-dynamic-linker,/usr/lib/ld-linux-x86-64.so.2 -Wl,-rpath,/usr/lib "\$@"
-GXXWRAP
-  chmod +x "$fhsroot/usr/bin/g++"
+  writeCcWrapper g++ "${gccUnwrapped}/bin/g++"
   ln -sf g++ "$fhsroot/usr/bin/c++"
 
-  # patch gcc.cc.lib's own ELFs -- skip the dynamic loader (patchelf'ing
-  # it corrupts it fatally, confirmed via standalone segfault repro).
-  while read -r f; do
-    case "$(basename "$f")" in
-      ld-linux-x86-64.so.2) continue ;;
-    esac
-    patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-    patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-  done < <(find "$fhsroot/usr/lib" -maxdepth 1 -type f -exec sh -c 'head -c4 "$1" | grep -q ELF' _ {} \; -print 2>/dev/null)
-  find "${gccLib}/lib" -maxdepth 1 -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/gcclib-elfs.txt
-  : > /tmp/gcclib-deps.txt
-  while read -r origf; do
-    ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/gcclib-deps.txt || true
-  done < /tmp/gcclib-elfs.txt
-  sort -u /tmp/gcclib-deps.txt > /tmp/gcclib-deps-uniq.txt
-  while read -r lib; do
-    dest="$fhsroot/usr/lib/$(basename "$lib")"
-    [ -e "$dest" ] && continue
-    cp -aL --no-preserve=ownership "$lib" "$dest"
-  done < /tmp/gcclib-deps-uniq.txt
+  # patch gcc.cc.lib's own ELFs, now sitting in $fhsroot/usr/lib.
+  patchelfTree "$fhsroot/usr/lib" -maxdepth 1
+  stageDeps "-maxdepth 1" "${gccLib}/lib"
 
   # --- BOOTSTRAP: binutils (as, ld) -> /usr/bin ---
   workbt=$TMPDIR/work-binutils
   mkdir -p "$workbt"
   cp -a --no-preserve=ownership ${binutilsUnwrapped}/bin/. "$workbt/"
   chmod -R u+w "$workbt"
-  while read -r f; do
-    patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-    patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-  done < <(find "$workbt" -type f -exec sh -c 'head -c4 "$1" | grep -q ELF' _ {} \; -print 2>/dev/null)
+  patchelfTree "$workbt"
   cp -a "$workbt/." "$fhsroot/usr/bin/"
 
-  find "${binutilsUnwrapped}/bin" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/bt-elfs.txt
-  : > /tmp/bt-deps.txt
-  while read -r origf; do
-    ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/bt-deps.txt || true
-  done < /tmp/bt-elfs.txt
-  sort -u /tmp/bt-deps.txt > /tmp/bt-deps-uniq.txt
-  while read -r lib; do
-    dest="$fhsroot/usr/lib/$(basename "$lib")"
-    [ -e "$dest" ] && continue
-    cp -aL --no-preserve=ownership "$lib" "$dest"
-  done < /tmp/bt-deps-uniq.txt
+  stageDeps "-maxdepth 1" "${binutilsUnwrapped}/bin"
 
   # --- BOOTSTRAP: make + a shell + coreutils + sed + grep + awk + lzip +
   # diffutils -> /usr/bin --- needed by essentially every package's
@@ -216,31 +233,18 @@ GXXWRAP
   chmod -R u+w "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.diffutils}/bin/. "$workmk/"
   chmod -R u+w "$workmk"
-  while read -r f; do
-    patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-    patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-  done < <(find "$workmk" -type f -exec sh -c 'head -c4 "$1" | grep -q ELF' _ {} \; -print 2>/dev/null)
+  patchelfTree "$workmk"
   cp -a "$workmk/." "$fhsroot/usr/bin/"
 
-  find "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin" -maxdepth 1 -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/mk-elfs.txt
-  : > /tmp/mk-deps.txt
-  while read -r origf; do
-    ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/mk-deps.txt || true
-  done < /tmp/mk-elfs.txt
-  sort -u /tmp/mk-deps.txt > /tmp/mk-deps-uniq.txt
-  while read -r lib; do
-    dest="$fhsroot/usr/lib/$(basename "$lib")"
-    [ -e "$dest" ] && continue
-    cp -aL --no-preserve=ownership "$lib" "$dest"
-  done < /tmp/mk-deps-uniq.txt
+  stageDeps "-maxdepth 1" "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin"
 
   # /bin/sh -- make and configure-generated shell commands hardcode
   # /bin/sh internally (not a PATH lookup).
   ln -sf /usr/bin/bash "$fhsroot/bin/sh"
 
-  # Every dependency library copied in by the four ldd-driven loops
-  # above (gcc-deps, gcclib-deps, bt-deps, mk-deps) was copied VERBATIM
-  # -- never patchelf'd. That was fine as long as no copied .so had its
+  # Every dependency library copied in by the four stageDeps calls
+  # above (gcc, gcc.cc.lib, binutils, mk tools) was copied VERBATIM --
+  # never patchelf'd. That was fine as long as no copied .so had its
   # OWN further transitive dependency, since each staged BINARY's
   # RPATH=/usr/lib only resolves that binary's own direct NEEDED
   # entries, per ELF semantics -- it does not propagate to a dependency
@@ -255,7 +259,12 @@ GXXWRAP
   # build-time glibc store path (not /usr/lib), so a "skip if it
   # already has an rpath" check incorrectly left it untouched. Fix:
   # unconditionally overwrite the rpath on every copied .so to /usr/lib,
-  # not just ones with none at all.
+  # not just ones with none at all. (This sweep is intentionally
+  # separate from patchelfTree above: unlike every patchelfTree caller,
+  # these files were never chmod -R'd after stageDeps copied them --
+  # cp -aL preserves the store's read-only permission bits -- so this
+  # loop does its own per-file chmod, and it deliberately does NOT skip
+  # files that already have an rpath, unlike patchelfTree's callers.)
   while read -r f; do
     case "$(head -c4 "$f" 2>/dev/null)" in
       $'\x7fELF') ;;
