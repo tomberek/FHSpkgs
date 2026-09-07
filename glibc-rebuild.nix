@@ -27,6 +27,7 @@ let
   bison = pkgs.bison;
   gettext = pkgs.gettext;
   python3Minimal = pkgs.python3Minimal;
+  pythonVersion = python3Minimal.pythonVersion;
   gnum4 = pkgs.gnum4;
 in
 pkgs.stdenv.mkDerivation {
@@ -103,9 +104,13 @@ pkgs.stdenv.mkDerivation {
     # executable by default (confirmed: "ModuleNotFoundError: No module
     # named 'encodings'" -- stageTool only copies bin/, never lib/).
     # Stage the real stdlib dir alongside /usr/bin/python3 at the
-    # relative path it actually searches.
-    cp -a --no-preserve=ownership ${python3Minimal}/lib/python3.13 "$fhsroot/usr/lib/python3.13"
-    chmod -R u+w "$fhsroot/usr/lib/python3.13"
+    # relative path it actually searches. Version derived from
+    # pythonVersion, not hardcoded -- a version bump in nixpkgs
+    # (confirmed: 3.13 -> 3.14 between two revisions used in this
+    # project) would otherwise silently break this with a real
+    # "No such file or directory" on the old hardcoded path.
+    cp -a --no-preserve=ownership ${python3Minimal}/lib/python${pythonVersion} "$fhsroot/usr/lib/python${pythonVersion}"
+    chmod -R u+w "$fhsroot/usr/lib/python${pythonVersion}"
 
     # glibc's own build invokes "sh" by bare name via $PATH (confirmed:
     # "make: sh: No such file or directory" with PATH=/usr/bin) rather
@@ -120,7 +125,7 @@ pkgs.stdenv.mkDerivation {
     # "FileNotFoundError: .../bash-5.3p9/bin/sh" failure mid-glibc-build.
     # Preserve that exact store path's shape inside the chroot, same
     # pattern already used for gcc-unwrapped's own libexec lookup.
-    __py_bash_sh=$(grep -oE '/nix/store/[a-z0-9]+-bash-[0-9.p]+/bin/sh' ${python3Minimal}/lib/python3.13/subprocess.py | head -1)
+    __py_bash_sh=$(grep -oE '/nix/store/[a-z0-9]+-bash-[0-9.p]+/bin/sh' ${python3Minimal}/lib/python${pythonVersion}/subprocess.py | head -1)
     if [ -n "$__py_bash_sh" ]; then
       mkdir -p "$fhsroot$(dirname "$__py_bash_sh")"
       ln -sf /usr/bin/bash "$fhsroot$__py_bash_sh"

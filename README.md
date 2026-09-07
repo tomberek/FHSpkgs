@@ -133,11 +133,16 @@ requires the same nested-chroot mechanism (`unshare --user
 
 ## Composing everything together: `env-fhs.nix`
 
-`env-fhs.nix` unions all 18 packages' outputs into one combined `/usr`
+`env-fhs.nix` unions all 19 packages' outputs into one combined `/usr`
 tree, plus a real bootstrap runtime layer underneath (glibc/gcc/binutils
-etc. from `toolchain.nix` — none of the 18 packages provide these; they
+etc. from `toolchain.nix` — none of the 19 packages provide these; they
 were explicitly excluded from every package's own output by
-`installOnlyNew`, so the union has to supply them from somewhere).
+`installOnlyNew`, so the union has to supply them from somewhere). Note
+that the bootstrap layer's own binutils is still a prebuilt nixpkgs
+binary, distinct from `binutils-fhs.nix` (a real from-source build of
+`as`/`ld`/`nm`/`objdump`/`ar`/`ranlib`/etc.) — the union legitimately
+overwrites the bootstrap's placeholder binutils with the from-source
+one, same pattern as coreutils/bash/gnused/gnugrep/gawk.
 
 **Why hardlinks, not store symlinks.** The natural Nix idiom for
 composing multiple derivation outputs is `symlinkJoin`/`buildEnv` —
@@ -169,19 +174,46 @@ path's final value, exactly matching how `installOnlyNew` already
 handles this same overwrite case within a single package's own build).
 
 `$out/manifest.tsv` records `path<TAB>hash<TAB>owning-package` for every
-one of the 1277 unioned files/symlinks — real, inspectable provenance
-for which package supplied what, not just "it built."
+one of the unioned files/symlinks — real, inspectable provenance for
+which package supplied what, not just "it built."
 
-**Verified two ways**: (1) an 11-step in-build smoke test chains
-tar+gzip+xz+patch+gawk+grep+diff+find+ed+attr/acl+file+patchelf+pigz
-together against the single unioned tree, each step depending on a
-different package's real binary; (2) a fully standalone check *outside*
-the Nix build sandbox entirely — copying `env-fhs`'s real store output
-to a scratch directory, `unshare --user --map-root-user --mount
---root=<that dir>`-ing into it independently, and running a real
+**Verified two ways**: (1) a 12-step in-build smoke test chains
+tar+gzip+xz+patch+gawk+grep+diff+find+ed+attr/acl+file+patchelf+pigz+
+binutils together against the single unioned tree, each step depending
+on a different package's real binary; (2) a fully standalone check
+*outside* the Nix build sandbox entirely — copying `env-fhs`'s real
+store output to a scratch directory, `unshare --user --map-root-user
+--mount --root=<that dir>`-ing into it independently, and running a real
 pigz round-trip + grep/sed/awk pipeline + `ptx --version`, proving the
 composed output is self-contained and usable on its own, not merely
 self-consistent during its own build.
+
+## Real, runnable environment: `flake.nix` + `fhs-shell`
+
+`flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
+`env-fhs`, the composed union, and `glibc-rebuild-fhs`), and a
+`fhs-shell` app / matching devshell that materializes `env-fhs`'s store
+output into a writable scratch root and enters it via the same
+`unshare --user --map-root-user --mount` + `chroot` mechanism used
+throughout this project's own builds:
+
+```
+nix run .#fhs-shell                    # interactive
+nix run .#fhs-shell -- -c 'grep --version'
+nix develop                            # fhs-shell is on PATH
+```
+
+One real gap this surfaced: `/usr/bin/gcc`/`g++` are wrapper scripts
+that `exec` the real `gcc-unwrapped` at its literal Nix store path (gcc's
+own driver looks up `libexec/gcc/<target>/<version>/` relative to
+itself — `toolchain.nix` can't flatten this the way it does every other
+bootstrap tool). That's invisible during this project's own *builds*,
+since Nix's build sandbox always has `/nix` mounted — but `fhs-shell`
+materializes into a plain directory *outside* any Nix sandbox, where
+`/nix` genuinely isn't present. Confirmed via a real failure (`gcc: ...
+No such file or directory` for its own store path) and fixed by
+bind-mounting `/nix/store` (read-only) into the chroot alongside the
+existing `/dev/null` bind-mount.
 
 ## Known, deliberate scope limits
 

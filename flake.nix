@@ -39,6 +39,7 @@
           gnused-fhs = call ./gnused-fhs.nix;
           coreutils-fhs = call ./coreutils-fhs.nix;
           patchelf-fhs = call ./patchelf-fhs.nix;
+          binutils-fhs = call ./binutils-fhs.nix;
           glibc-rebuild-fhs = call ./glibc-rebuild.nix;
 
           # The union of every package above (plus the bootstrap runtime
@@ -81,7 +82,7 @@
           cleanup() { rm -rf "$root"; }
           trap cleanup EXIT
 
-          mkdir -p "$root/usr" "$root/tmp" "$root/dev" "$root/bin" "$root/etc" "$root/proc"
+          mkdir -p "$root/usr" "$root/tmp" "$root/dev" "$root/bin" "$root/etc" "$root/proc" "$root/nix/store"
 
           # Hardlink every file from env-fhs's real Nix store output
           # into the writable root, falling back to a copy on EXDEV --
@@ -112,8 +113,24 @@
           # a cache. Building glibc-rebuild-fhs's own self-hosted
           # ldconfig into this composed tree is a separate, opt-in step
           # (see glibc-rebuild.nix), not part of the default env-fhs union.
+          #
+          # /nix/store IS bind-mounted (read-only) here -- unlike every
+          # other real file in this tree, /usr/bin/gcc (and g++) are
+          # WRAPPER SCRIPTS that exec the real gcc-unwrapped at its
+          # literal Nix store path (needed because gcc's own driver
+          # looks up libexec/gcc/<target>/<version>/ relative to
+          # itself -- toolchain.nix can't "flatten" this the way it
+          # does for every other bootstrap tool). That's invisible
+          # during this project's OWN builds, since Nix's build sandbox
+          # always has /nix mounted -- but fhs-shell materializes
+          # env-fhs's output into a plain /tmp directory OUTSIDE any
+          # Nix sandbox, so /nix genuinely isn't there unless we mount
+          # it ourselves. Confirmed via a real failure: gcc -o ...
+          # inside fhs-shell reported "No such file or directory" for
+          # its own store path.
           unshare --user --map-root-user --mount -- bash -c '
             mount --bind /dev/null "$FHS_ROOT/dev/null"
+            mount --bind -o ro /nix/store "$FHS_ROOT/nix/store"
             chroot "$FHS_ROOT" /usr/bin/bash -c "export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp; exec /usr/bin/bash -l \"\$@\"" -- "$@"
           ' -- "$@"
         '';

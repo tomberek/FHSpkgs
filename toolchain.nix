@@ -185,14 +185,19 @@ GXXWRAP
     cp -aL --no-preserve=ownership "$lib" "$dest"
   done < /tmp/bt-deps-uniq.txt
 
-  # --- BOOTSTRAP: make + a shell + coreutils + sed + grep + awk + lzip
-  # -> /usr/bin --- needed by essentially every package's configure
-  # script + Makefile. Every one of these is a PREBUILT nixpkgs binary
-  # used only to get the bootstrap toolchain working; the package set
-  # itself (batch*-fhs.nix) later builds its OWN coreutils/sed/grep/awk
-  # from real source and those real builds simply overwrite these
-  # bootstrap copies via their own `make install` -- at that point the
-  # bootstrap copy has done its one job and is gone.
+  # --- BOOTSTRAP: make + a shell + coreutils + sed + grep + awk + lzip +
+  # diffutils -> /usr/bin --- needed by essentially every package's
+  # configure script + Makefile. Every one of these is a PREBUILT
+  # nixpkgs binary used only to get the bootstrap toolchain working;
+  # the package set itself later builds its OWN
+  # coreutils/sed/grep/awk/diffutils from real source and those real
+  # builds simply overwrite these bootstrap copies via their own `make
+  # install` -- at that point the bootstrap copy has done its one job
+  # and is gone. diffutils (cmp) was added after a real failure
+  # building binutils from source: many autotools packages' generated
+  # Makefiles use a `move-if-change` helper that calls `cmp` to detect
+  # whether a regenerated file actually changed -- confirmed via
+  # "cmp: command not found" during a real build.
   workmk=$TMPDIR/work-mk
   mkdir -p "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.gnumake}/bin/. "$workmk/"
@@ -209,13 +214,15 @@ GXXWRAP
   chmod -R u+w "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.gawk}/bin/. "$workmk/"
   chmod -R u+w "$workmk"
+  cp -a --no-preserve=ownership ${bootstrap.diffutils}/bin/. "$workmk/"
+  chmod -R u+w "$workmk"
   while read -r f; do
     patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
     patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
   done < <(find "$workmk" -type f -exec sh -c 'head -c4 "$1" | grep -q ELF' _ {} \; -print 2>/dev/null)
   cp -a "$workmk/." "$fhsroot/usr/bin/"
 
-  find "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" -maxdepth 1 -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/mk-elfs.txt
+  find "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin" -maxdepth 1 -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print 2>/dev/null > /tmp/mk-elfs.txt
   : > /tmp/mk-deps.txt
   while read -r origf; do
     ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/mk-deps.txt || true
@@ -410,7 +417,15 @@ GXXWRAP
 
     echo "--- $__ba_name: make ---"
     set +e
-    run "$__ba_wd" make -j1 CC=/usr/bin/gcc CXX=/usr/bin/g++ AR=/usr/bin/ar RANLIB=/usr/bin/ranlib > /tmp/$__ba_name-make.log 2>&1
+    # MAKEINFO=true: some packages' Makefiles regenerate .info docs via
+    # makeinfo if their source .texi files look newer than the info file
+    # (confirmed with binutils -- unpacking a tarball resets mtimes,
+    # tripping this check even though nothing was actually edited).
+    # makeinfo/texinfo was never staged in this bootstrap toolchain, and
+    # nixpkgs' own binutils recipe avoids the same dependency the same
+    # way (see its makeFlags comment); harmless no-op for every package
+    # that doesn't hit this path.
+    run "$__ba_wd" make -j1 CC=/usr/bin/gcc CXX=/usr/bin/g++ AR=/usr/bin/ar RANLIB=/usr/bin/ranlib MAKEINFO=true > /tmp/$__ba_name-make.log 2>&1
     __ba_status=$?
     set -e
     if [ "$__ba_status" -ne 0 ]; then

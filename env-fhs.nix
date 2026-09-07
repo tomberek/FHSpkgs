@@ -28,6 +28,7 @@ let
     (import ./gnused-fhs.nix { inherit pkgs; })
     (import ./coreutils-fhs.nix { inherit pkgs; })
     (import ./patchelf-fhs.nix { inherit pkgs; })
+    (import ./binutils-fhs.nix { inherit pkgs; })
   ];
 in
 pkgs.stdenv.mkDerivation {
@@ -121,6 +122,7 @@ pkgs.stdenv.mkDerivation {
     unionPackage gnused ${builtins.elemAt packages 15}
     unionPackage coreutils ${builtins.elemAt packages 16}
     unionPackage patchelf ${builtins.elemAt packages 17}
+    unionPackage binutils ${builtins.elemAt packages 18}
 
     if [ "$fail" -ne 0 ]; then
       echo "UNION FAILED: real conflicts found (see CONFLICT lines above)"
@@ -208,7 +210,20 @@ PATCHEOF
     run /tmp bash -c 'cp /tmp/src.txt /tmp/pigz-test.txt && /usr/bin/pigz -f /tmp/pigz-test.txt && /usr/bin/pigz -d -f /tmp/pigz-test.txt.gz'
     run /tmp bash -c "grep -q 'LINE TWO PATCHED' /tmp/pigz-test.txt"
 
-    echo "COMBINED ENVIRONMENT SMOKE TEST SUCCEEDED: 11 real cross-package operations, all against the SAME unioned /usr tree, zero conflicts, zero /nix/store visible"
+    # 12. assemble+link a real program with binutils' own from-source
+    # as/ld, then inspect the result with its own from-source
+    # nm/objdump/readelf/strip -- all against the SAME unioned tree.
+    cat > "$fhsroot/tmp/bt.c" <<'BTEOF'
+#include <stdio.h>
+int main(void) { printf("binutils in the combined env: ok\n"); return 0; }
+BTEOF
+    run /tmp /usr/bin/gcc -o /tmp/bt /tmp/bt.c
+    run /tmp bash -c "/usr/bin/nm /tmp/bt | grep -q main"
+    run /tmp bash -c "/usr/bin/objdump -d /tmp/bt | grep -q main"
+    run /tmp /usr/bin/strip /tmp/bt
+    run /tmp /tmp/bt
+
+    echo "COMBINED ENVIRONMENT SMOKE TEST SUCCEEDED: 12 real cross-package operations, all against the SAME unioned /usr tree, zero conflicts, zero /nix/store visible"
   '';
 
   installPhase = ''
