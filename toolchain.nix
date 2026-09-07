@@ -305,8 +305,26 @@ GXXWRAP
     # nonexistent-in-chroot path), and separately config.guess tried to
     # create a temp file under $TMPDIR=/build (the outer sandbox's build
     # dir, absent inside the chroot). Explicitly reset both.
-    unshare --user --map-root-user --mount --root="$fhsroot" --wd="$__run_wd" -- \
-      /usr/bin/bash -c 'export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp; unset CONFIG_SHELL; exec "$@"' -- "$@"
+    #
+    # $fhsroot/dev/null is a REGULAR FILE, not a real char device --
+    # mknod'ing a genuine one fails even as mapped-root (confirmed:
+    # "Operation not permitted", $TMPDIR is a nodev tmpfs). So every `>
+    # /dev/null` redirect during a command actually WRITES content into
+    # it, corrupting it for whatever runs next -- confirmed via a real
+    # repro: gcc's own internal `-x c /dev/null` const-probe during a
+    # glibc build failed to compile because an earlier `mkdir --version
+    # > /dev/null` mid-build had left real text sitting in there.
+    # Fix: bind-mount the OUTER sandbox's real /dev/null over it, inside
+    # this SAME unshare invocation, before chrooting in -- the mount
+    # lives exactly as long as this one command runs (confirmed: a
+    # truncate-after-the-fact approach is NOT sufficient, since a single
+    # `make -jN` invocation redirects to /dev/null many times across its
+    # own lifetime, all before `run()` ever gets control back).
+    export __run_fhsroot="$fhsroot"
+    unshare --user --map-root-user --mount -- bash -c '
+      mount --bind /dev/null "$__run_fhsroot/dev/null"
+      exec chroot "$__run_fhsroot" /usr/bin/bash -c "cd \"\$1\"; shift; export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp; unset CONFIG_SHELL; exec \"\$@\"" -- "$@"
+    ' -- "$__run_wd" "$@"
   }
 
   # __unpackSource(destdir, src) -- unpacks src (a REAL upstream tarball
