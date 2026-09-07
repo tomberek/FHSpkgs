@@ -231,6 +231,36 @@ GXXWRAP
   # /bin/sh internally (not a PATH lookup).
   ln -sf /usr/bin/bash "$fhsroot/bin/sh"
 
+  # Every dependency library copied in by the four ldd-driven loops
+  # above (gcc-deps, gcclib-deps, bt-deps, mk-deps) was copied VERBATIM
+  # -- never patchelf'd. That was fine as long as no copied .so had its
+  # OWN further transitive dependency, since each staged BINARY's
+  # RPATH=/usr/lib only resolves that binary's own direct NEEDED
+  # entries, per ELF semantics -- it does not propagate to a dependency
+  # library's dependencies. Confirmed via a real failure on a newer
+  # nixpkgs revision than this project was originally built against:
+  # gnugrep's libpcre2-8.so.0 gained a new transitive dependency on
+  # libpthread.so.0 (absent in the older glibc this was first verified
+  # with), and `LD_DEBUG=libs` showed the loader falling through to
+  # /nix/store-based default search paths for that second-level
+  # dependency. The copied libpcre2-8.so.0 was NOT rpath-less, as first
+  # assumed -- it already had its OWN real RPATH, pointing at its own
+  # build-time glibc store path (not /usr/lib), so a "skip if it
+  # already has an rpath" check incorrectly left it untouched. Fix:
+  # unconditionally overwrite the rpath on every copied .so to /usr/lib,
+  # not just ones with none at all.
+  while read -r f; do
+    case "$(head -c4 "$f" 2>/dev/null)" in
+      $'\x7fELF') ;;
+      *) continue ;;
+    esac
+    case "$(basename "$f")" in
+      ld-linux-x86-64.so.2) continue ;;
+    esac
+    chmod u+w "$f" 2>/dev/null || true
+    patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
+  done < <(find "$fhsroot/usr/lib" -maxdepth 1 \( -name '*.so' -o -name '*.so.*' \))
+
   # snapshotToolchain() -- records every path + content hash currently
   # under $fhsroot/usr, so that installOnlyNew() (below) can later tell
   # "files the bootstrap toolchain put there" apart from "files THIS
