@@ -40,6 +40,7 @@
           coreutils-fhs = call ./coreutils-fhs.nix;
           patchelf-fhs = call ./patchelf-fhs.nix;
           binutils-fhs = call ./binutils-fhs.nix;
+          gcc-fhs = call ./gcc-fhs.nix;
           glibc-rebuild-fhs = call ./glibc-rebuild.nix;
 
           # The union of every package above (plus the bootstrap runtime

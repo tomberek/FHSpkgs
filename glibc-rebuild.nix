@@ -112,12 +112,6 @@ pkgs.stdenv.mkDerivation {
     cp -a --no-preserve=ownership ${python3Minimal}/lib/python${pythonVersion} "$fhsroot/usr/lib/python${pythonVersion}"
     chmod -R u+w "$fhsroot/usr/lib/python${pythonVersion}"
 
-    # glibc's own build invokes "sh" by bare name via $PATH (confirmed:
-    # "make: sh: No such file or directory" with PATH=/usr/bin) rather
-    # than the hardcoded /bin/sh every other package here needed. Add a
-    # second symlink at /usr/bin/sh alongside the existing /bin/sh one.
-    ln -sf bash "$fhsroot/usr/bin/sh"
-
     # nixpkgs' python3Minimal has its own subprocess.py PATCHED to hardcode
     # the exact bash STORE PATH used at ITS build time for shell=True calls
     # (since plain /bin/sh isn't guaranteed inside a Nix build sandbox

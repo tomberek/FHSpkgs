@@ -188,10 +188,57 @@ pigz round-trip + grep/sed/awk pipeline + `ptx --version`, proving the
 composed output is self-contained and usable on its own, not merely
 self-consistent during its own build.
 
+## Self-hosting the core toolchain: `binutils-fhs.nix`, `glibc-rebuild.nix`, `gcc-fhs.nix`
+
+The bootstrap toolchain (`toolchain.nix`) borrows glibc/binutils/gcc
+wholesale, prebuilt, from nixpkgs — real, but not proof that this set
+could produce its *own* toolchain, not just userland tools built by
+someone else's. Three files close that gap by building each piece from
+real upstream source, using the bootstrap toolchain as the seed
+compiler (the same two-tier role every other package's build plays
+here — the bootstrap copy's only job is to build the real thing, never
+claimed to *be* the software):
+
+- **`binutils-fhs.nix`** — real `as`/`ld`/`nm`/`objdump`/`ar`/`ranlib`/
+  `strip`/`readelf`/etc., built from the real `binutils-with-gold`
+  tarball. Part of `env-fhs`'s union (legitimately overwrites the
+  bootstrap toolchain's prebuilt binutils, same overwrite pattern as
+  coreutils/bash/gnused/gnugrep/gawk).
+- **`glibc-rebuild.nix`** — real, *unpatched* upstream glibc (deliberately
+  not nixpkgs' own glibc, which patches `LD_SO_CACHE`/`LD_SO_CONF` to
+  point at its own store path instead of plain `/etc` — see the file's
+  own header comment). Confirmed the resulting loader genuinely reads
+  `/etc/ld.so.cache`, and a self-built `ldconfig` writes a real one.
+  Kept standalone, *not* part of `env-fhs`'s union — swapping the C
+  library live carries real ABI-conflict hazards for anything already
+  running (confirmed the hard way; see the file's own history).
+- **`gcc-fhs.nix`** — real gcc (`--enable-languages=c,c++` only,
+  `--disable-bootstrap`), with gmp/mpfr/mpc staged as in-tree source
+  subdirectories the exact way upstream's own
+  `contrib/download_prerequisites` does it (extract each real tarball,
+  symlink `gmp -> gmp-<version>/` etc.) — not prebuilt libraries. Also
+  kept standalone for the same live-toolchain-swap reason as glibc.
+  Verified end-to-end: a real C program and a real C++ program
+  (exercising `libstdc++`, STL containers, `iostream`) both compile,
+  link, and run correctly with the just-built `gcc`/`g++`.
+
+Building these surfaced several real, general bootstrap gaps now fixed
+in shared `toolchain.nix` (not just worked around per-file): `/usr/bin/sh`
+(some build systems invoke `sh` via `$PATH`, not the hardcoded `/bin/sh`
+every package already needed), `/lib64/ld-linux-x86-64.so.2` (gcc's own
+not-yet-installed stage-1 compiler embeds this as its default dynamic-
+linker path, independent of any flag passed to it), `LD_LIBRARY_PATH=
+/usr/lib` in `run()` (a strictly-additive fallback below RPATH in
+glibc's search order — needed because that same stage-1 compiler links
+its own conftest probes with no RPATH at all), and staging `tar` in the
+bootstrap toolchain itself (gcc's `make install` tars up headers with a
+plain `tar -cf -` pipeline *inside* the chroot, not the outer sandbox's
+tar used only to unpack sources before chrooting).
+
 ## Real, runnable environment: `flake.nix` + `fhs-shell`
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
-`env-fhs`, the composed union, and `glibc-rebuild-fhs`), and a
+`env-fhs`, the composed union, `glibc-rebuild-fhs`, and `gcc-fhs`), and a
 `fhs-shell` app / matching devshell that materializes `env-fhs`'s store
 output into a writable scratch root and enters it via the same
 `unshare --user --map-root-user --mount` + `chroot` mechanism used

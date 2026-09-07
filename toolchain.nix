@@ -203,18 +203,23 @@ WRAP
   stageDeps "-maxdepth 1" "${binutilsUnwrapped}/bin"
 
   # --- BOOTSTRAP: make + a shell + coreutils + sed + grep + awk + lzip +
-  # diffutils -> /usr/bin --- needed by essentially every package's
-  # configure script + Makefile. Every one of these is a PREBUILT
-  # nixpkgs binary used only to get the bootstrap toolchain working;
-  # the package set itself later builds its OWN
-  # coreutils/sed/grep/awk/diffutils from real source and those real
+  # diffutils + tar -> /usr/bin --- needed by essentially every
+  # package's configure script + Makefile. Every one of these is a
+  # PREBUILT nixpkgs binary used only to get the bootstrap toolchain
+  # working; the package set itself later builds its OWN
+  # coreutils/sed/grep/awk/diffutils/tar from real source and those real
   # builds simply overwrite these bootstrap copies via their own `make
   # install` -- at that point the bootstrap copy has done its one job
   # and is gone. diffutils (cmp) was added after a real failure
   # building binutils from source: many autotools packages' generated
   # Makefiles use a `move-if-change` helper that calls `cmp` to detect
   # whether a regenerated file actually changed -- confirmed via
-  # "cmp: command not found" during a real build.
+  # "cmp: command not found" during a real build. gnutar was added
+  # after a real failure building gcc from source: gcc's own `make
+  # install` tars up its include-fixed headers via a plain `tar -cf -`
+  # pipeline INSIDE the chroot (not the outer sandbox's own tar, which
+  # only ever unpacks package sources before chrooting) -- confirmed
+  # via "tar: command not found" during a real build.
   workmk=$TMPDIR/work-mk
   mkdir -p "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.gnumake}/bin/. "$workmk/"
@@ -233,14 +238,37 @@ WRAP
   chmod -R u+w "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.diffutils}/bin/. "$workmk/"
   chmod -R u+w "$workmk"
+  cp -a --no-preserve=ownership ${bootstrap.gnutar}/bin/. "$workmk/"
+  chmod -R u+w "$workmk"
   patchelfTree "$workmk"
   cp -a "$workmk/." "$fhsroot/usr/bin/"
 
-  stageDeps "-maxdepth 1" "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin"
+  stageDeps "-maxdepth 1" "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin" "${bootstrap.gnutar}/bin"
 
   # /bin/sh -- make and configure-generated shell commands hardcode
-  # /bin/sh internally (not a PATH lookup).
+  # /bin/sh internally (not a PATH lookup). /usr/bin/sh is ALSO needed
+  # -- some build systems invoke "sh" by bare name via $PATH instead
+  # (confirmed on two separate real packages built here: glibc's own
+  # build -- "make: sh: No such file or directory" -- and gcc's --
+  # "/bin/sh: line 4: sh: command not found" during libgcc's build).
   ln -sf /usr/bin/bash "$fhsroot/bin/sh"
+  ln -sf bash "$fhsroot/usr/bin/sh"
+
+  # /lib64/ld-linux-x86-64.so.2 -- gcc's OWN self-built stage-1 compiler
+  # (xgcc, before gcc itself is installed) embeds this as its default
+  # dynamic-linker path for produced binaries, independent of any
+  # configure flag passed to it -- confirmed via a real failure
+  # building gcc from source: a conftest binary compiled by xgcc
+  # requested interpreter /lib64/ld-linux-x86-64.so.2 (not
+  # /usr/lib/ld-linux-x86-64.so.2, the path staged everywhere else in
+  # this chroot), and failed with "cannot execute: required file not
+  # found" since that path never existed. Every OTHER package built
+  # here only ever runs the ALREADY-WRAPPED /usr/bin/gcc (which
+  # explicitly passes -Wl,-dynamic-linker,/usr/lib/...), so this never
+  # surfaced before gcc's own self-build, which necessarily runs the
+  # raw, not-yet-wrapped in-tree xgcc directly.
+  mkdir -p "$fhsroot/lib64"
+  ln -sf /usr/lib/ld-linux-x86-64.so.2 "$fhsroot/lib64/ld-linux-x86-64.so.2"
 
   # Every dependency library copied in by the four stageDeps calls
   # above (gcc, gcc.cc.lib, binutils, mk tools) was copied VERBATIM --
@@ -366,10 +394,25 @@ WRAP
     # truncate-after-the-fact approach is NOT sufficient, since a single
     # `make -jN` invocation redirects to /dev/null many times across its
     # own lifetime, all before `run()` ever gets control back).
+    #
+    # LD_LIBRARY_PATH=/usr/lib: every package built here compiles via
+    # the WRAPPED /usr/bin/gcc, which injects -Wl,-rpath,/usr/lib on
+    # every invocation -- so its own output always finds libc.so.6 via
+    # RPATH, with no dependency on LD_LIBRARY_PATH at all. gcc's OWN
+    # self-build (gcc-fhs.nix) is the one real exception: its in-tree,
+    # not-yet-installed stage-1 compiler (xgcc) compiles autoconf's
+    # `./conftest` probes directly, with NO rpath at all -- confirmed
+    # via a real failure ("./conftest: error while loading shared
+    # libraries: libc.so.6: cannot open shared object file"). Since
+    # RPATH always takes priority over LD_LIBRARY_PATH in glibc's
+    # search order, this is a strictly additive fallback: it cannot
+    # change resolution for any binary that already has a working
+    # RPATH (every other package here), only for rpath-less ones like
+    # xgcc's stage-1 conftest probes.
     export __run_fhsroot="$fhsroot"
     unshare --user --map-root-user --mount -- bash -c '
       mount --bind /dev/null "$__run_fhsroot/dev/null"
-      exec chroot "$__run_fhsroot" /usr/bin/bash -c "cd \"\$1\"; shift; export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp; unset CONFIG_SHELL; exec \"\$@\"" -- "$@"
+      exec chroot "$__run_fhsroot" /usr/bin/bash -c "cd \"\$1\"; shift; export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp LD_LIBRARY_PATH=/usr/lib; unset CONFIG_SHELL; exec \"\$@\"" -- "$@"
     ' -- "$__run_wd" "$@"
   }
 
