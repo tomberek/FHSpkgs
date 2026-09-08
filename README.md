@@ -280,33 +280,53 @@ reusing `env-fhs.nix`'s own established overwrite pattern
 promoted into shared `toolchain.nix` as `overlayPackage()` once a
 second file needed the same composition.
 
-## Extending the proof: `bootstrap-suite.nix` — the whole userland set, not just one library
+## Extending the proof: `bootstrap-suite.nix` — the whole package set, not just one library
 
 `bootstrap-proof.nix` shows the composed toolchain builds *a* real
 library. `bootstrap-suite.nix` asks the stronger question: is it a
 general-purpose toolchain, or one that happens to work for zlib
-specifically? It rebuilds all 16 real final-stdenv tools this project
-already proved once against the *bootstrap* toolchain (xz, diffutils,
-findutils, gawk, patch, attr, acl, gnugrep, file, gnutar, gzip, ed,
-bash, gnused, coreutils, patchelf) — using *only* the composed
-self-built gcc+binutils, with the exact real recipes and real functional
-smoke tests each standalone `<pkg>-fhs.nix` file already established
-(not re-derived). Confirmed: all 16 pass, including the same honest
-`acl` skip (no ACL support on this build sandbox's filesystem) every
-other file in this project already documents — not a new gap.
+specifically? It rebuilds all 18 real packages this project already
+proved once against the *bootstrap* toolchain — zlib, pigz (the
+dependency-chaining pair), and the 16 final-stdenv tools (xz,
+diffutils, findutils, gawk, patch, attr, acl, gnugrep, file, gnutar,
+gzip, ed, bash, gnused, coreutils, patchelf) — using *only* the
+composed self-built gcc+binutils, with the exact real recipes and real
+functional smoke tests each standalone `<pkg>-fhs.nix` file already
+established (not re-derived). Confirmed: all 18 pass, including the
+same honest `acl` skip (no ACL support on this build sandbox's
+filesystem) every other file in this project already documents — not a
+new gap. This is 100% of the non-toolchain package set this project has
+ever built, proven again end to end with a self-built compiler+linker.
 
-One more real, non-obvious bug found here, fixed in shared
-`toolchain.nix`'s `run()`: once this suite's own from-source `bash`
-build overwrites `/usr/bin/bash` with a binary compiled by the composed,
-*unwrapped* self-built gcc (no automatic `-Wl,-rpath,/usr/lib`
-injection, unlike the normal wrapped `/usr/bin/gcc` every other package
-here uses), that new bash has no RPATH at all — so the ELF loader must
-resolve *bash's own* dependency on `libdl.so.2` at `exec` time, before a
-single line of its own script body runs. The existing `LD_LIBRARY_PATH`
-fallback (added for gcc's stage-1 `xgcc`) was set *inside* that same
-`/usr/bin/bash -c "..."` invocation — too late by construction. Fixed by
-exporting it in the *outer* `unshare` bash instead, before `chroot`
-`exec`s into the target bash (environment variables survive `exec`).
+Two more real, non-obvious bugs found here:
+
+1. Fixed in shared `toolchain.nix`'s `run()`: once this suite's own
+   from-source `bash` build overwrites `/usr/bin/bash` with a binary
+   compiled by the composed, *unwrapped* self-built gcc (no automatic
+   `-Wl,-rpath,/usr/lib` injection, unlike the normal wrapped
+   `/usr/bin/gcc` every other package here uses), that new bash has no
+   RPATH at all — so the ELF loader must resolve *bash's own*
+   dependency on `libdl.so.2` at `exec` time, before a single line of
+   its own script body runs. The existing `LD_LIBRARY_PATH` fallback
+   (added for gcc's stage-1 `xgcc`) was set *inside* that same
+   `/usr/bin/bash -c "..."` invocation — too late by construction. Fixed
+   by exporting it in the *outer* `unshare` bash instead, before
+   `chroot` `exec`s into the target bash (environment variables survive
+   `exec`).
+2. Fixed in `bootstrap-suite.nix` itself: `pigz-fhs.nix`/`acl-fhs.nix`
+   each call `snapshotToolchain()` a *second* time to scope their own
+   `$out` down to just the named package (excluding an internal
+   dependency they build first). Copying that same pattern into a file
+   that builds *18 independent packages in sequence* was wrong —
+   `installOnlyNew` always diffs against the *last* snapshot taken, so
+   re-snapshotting between every few packages silently excluded
+   everything built before the final snapshot from `$out`, even though
+   each one's own build and functional check had genuinely passed.
+   Confirmed via a real, direct inspection: the first "successful" build
+   was missing `pigz`, `zlib`, and 5 other tools from its store output
+   entirely. Fixed by snapshotting only once, right after the gcc+
+   binutils overlay — this file's `$out` is meant to hold everything the
+   suite builds, as one unit, unlike the per-package standalone files.
 
 ## Real, runnable environment: `flake.nix` + `fhs-shell`
 

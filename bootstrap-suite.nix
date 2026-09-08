@@ -3,15 +3,16 @@
 # Extends bootstrap-proof.nix's capstone from "one third-party library"
 # to "the rest of the userland package set" -- proving the composed,
 # self-built gcc+binutils is a general-purpose toolchain, not one that
-# happens to work for a single trivial library. Rebuilds all 16 of the
-# real final-stdenv tools this project already built once against the
-# BOOTSTRAP toolchain (see e.g. xz-fhs.nix, coreutils-fhs.nix, ...),
-# this time using ONLY the composed self-built gcc (gcc-fhs.nix) +
-# self-built binutils (binutils-fhs.nix), with the exact same real
-# upstream recipes (configure flags read from each existing <pkg>-fhs.nix
-# file, not re-derived) and the exact same real functional smoke tests --
-# so a pass here is a direct, apples-to-apples confirmation that the
-# self-built toolchain reproduces every previously-proven build.
+# happens to work for a single trivial library. Rebuilds all 18 of the
+# real packages this project already built once against the BOOTSTRAP
+# toolchain (zlib, pigz, and the 16 real final-stdenv tools -- see e.g.
+# xz-fhs.nix, coreutils-fhs.nix, ...), this time using ONLY the composed
+# self-built gcc (gcc-fhs.nix) + self-built binutils (binutils-fhs.nix),
+# with the exact same real upstream recipes (configure flags read from
+# each existing <pkg>-fhs.nix file, not re-derived) and the exact same
+# real functional smoke tests -- so a pass here is a direct,
+# apples-to-apples confirmation that the self-built toolchain reproduces
+# every previously-proven build in this project, completing the set.
 #
 # Same ABI-compatibility scoping as bootstrap-proof.nix: composes
 # gcc-fhs + binutils-fhs only (both built against the BOOTSTRAP glibc,
@@ -52,6 +53,37 @@ pkgs.stdenv.mkDerivation {
     snapshotToolchain
 
     echo "############################################################"
+    echo "# Rebuilding zlib + pigz (the dependency-chaining pair) with"
+    echo "# the composed self-built gcc+binutils first."
+    echo "############################################################"
+
+    buildAutotools zlib ${pkgs.zlib.src}
+    cat > "$fhsroot/tmp/zt.c" <<'EOF'
+#include <zlib.h>
+#include <stdio.h>
+int main(void) { printf("zlibVersion=%s\n", zlibVersion()); return 0; }
+EOF
+    run /tmp /usr/bin/gcc -o /tmp/zt /tmp/zt.c -lz
+    run /tmp bash -c '/tmp/zt | grep -q zlibVersion'
+    echo "zlib: FUNCTIONAL CHECK OK"
+
+    # NOTE: unlike pigz-fhs.nix/acl-fhs.nix, this file does NOT
+    # re-snapshot between zlib and pigz (or anywhere else below).
+    # Those standalone files re-snapshot to scope THEIR OWN installed
+    # output down to just the one package they're named after (pigz's
+    # $out excludes the zlib it built as an internal dependency). This
+    # file's $out is meant to hold EVERYTHING the suite builds, as one
+    # unit -- a real, confirmed bug found running this exact file:
+    # re-snapshotting between packages here silently excluded every
+    # package built before the LAST snapshotToolchain call from the
+    # final installOnlyNew diff, even though each one's own build and
+    # functional check inside the log had already passed correctly.
+    buildMake pigz ${pkgs.pigz.src} \
+      'mkdir -p /usr/bin && install -Dm755 pigz /usr/bin/pigz && ln -sf pigz /usr/bin/unpigz'
+    run /tmp bash -c 'printf "pigz suite payload\n" > /tmp/pigz-rt.txt && /usr/bin/pigz -f /tmp/pigz-rt.txt && /usr/bin/pigz -d -f /tmp/pigz-rt.txt.gz && grep -q "pigz suite payload" /tmp/pigz-rt.txt'
+    echo "pigz: FUNCTIONAL CHECK OK"
+
+    echo "############################################################"
     echo "# Rebuilding all 16 real final-stdenv tools with the"
     echo "# composed self-built gcc+binutils -- real recipes, real"
     echo "# functional smoke tests, same standard as every standalone"
@@ -88,7 +120,6 @@ PATCHEOF
     echo "patch: FUNCTIONAL CHECK OK"
 
     buildAutotools attr ${pkgs.attr.src}
-    snapshotToolchain
     buildAutotools acl ${pkgs.acl.src}
     run /tmp /usr/bin/touch /tmp/acl-test.txt
     set +e
@@ -145,7 +176,7 @@ PATCHEOF
     run /tmp bash -c "/usr/bin/patchelf --print-rpath /tmp/patchelf-target | grep -q /usr/lib"
     echo "patchelf: FUNCTIONAL CHECK OK"
 
-    echo "BOOTSTRAP SUITE SUCCEEDED: all 16 real final-stdenv tools rebuilt from source, using ONLY the composed self-built gcc+binutils, every real functional check passed"
+    echo "BOOTSTRAP SUITE SUCCEEDED: all 18 real packages (zlib, pigz, and the 16 final-stdenv tools) rebuilt from source, using ONLY the composed self-built gcc+binutils, every real functional check passed"
   '';
 
   installPhase = ''
