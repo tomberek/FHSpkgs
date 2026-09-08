@@ -240,10 +240,23 @@ WRAP
   chmod -R u+w "$workmk"
   cp -a --no-preserve=ownership ${bootstrap.gnutar}/bin/. "$workmk/"
   chmod -R u+w "$workmk"
+  # findutils (find) -- GNU libtool's own archive-merge step (extracting
+  # a convenience .a via `ar --plugin ... x`, used to fold libsupc++'s
+  # real operator-new/delete objects into libstdc++.a during gcc's own
+  # build) calls `find` internally to discover the files it just
+  # extracted -- confirmed via a real "libtool: line NNNN: find: command
+  # not found" failure, silently swallowed by libtool's own error
+  # handling (it doesn't propagate as a nonzero exit), which left
+  # libstdc++.a missing every convenience-library object with no visible
+  # build failure at all until a LATER package tried to statically link
+  # against the incomplete archive (gcc-stage2.nix's own build-time
+  # generator tools, "undefined reference to operator delete").
+  cp -a --no-preserve=ownership ${bootstrap.findutils}/bin/. "$workmk/"
+  chmod -R u+w "$workmk"
   patchelfTree "$workmk"
   cp -a "$workmk/." "$fhsroot/usr/bin/"
 
-  stageDeps "-maxdepth 1" "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin" "${bootstrap.gnutar}/bin"
+  stageDeps "-maxdepth 1" "${bootstrap.gnumake}/bin" "${bootstrap.bash}/bin" "${bootstrap.coreutils}/bin" "${bootstrap.gnused}/bin" "${bootstrap.lzip}/bin" "${bootstrap.gnugrep}/bin" "${bootstrap.gawk}/bin" "${bootstrap.diffutils}/bin" "${bootstrap.gnutar}/bin" "${bootstrap.findutils}/bin"
 
   # /bin/sh -- make and configure-generated shell commands hardcode
   # /bin/sh internally (not a PATH lookup). /usr/bin/sh is ALSO needed
@@ -375,6 +388,27 @@ WRAP
     __op_out="$1"
     while read -r f; do
       relpath=$(echo "$f" | sed "s|^$__op_out/usr/||")
+      # gcc-fhs's own build installs its 64-bit target libraries
+      # (libstdc++.so.6 etc.) under lib64/, not lib/ -- a real, gcc-
+      # documented convention (config/i386/t-linux64's own comment:
+      # "other distributions install libraries into /lib64 and
+      # /usr/lib64"), triggered because we never override
+      # MULTILIB_OSDIRNAMES. Every other file in this project
+      # standardizes on /usr/lib only (toolchain.nix's own staging,
+      # env-fhs's union, bootstrap-env's composition) -- confirmed via a
+      # real failure building gcc a second time with itself: the
+      # self-built gcc/g++ link with -L/usr/lib (from
+      # --with-build-sysroot=/), never searching /usr/lib64, so
+      # anything gcc-fhs put there (like libstdc++'s sized-delete
+      # symbol) was invisible to a stage-2 build. Redirect lib64/...
+      # paths to lib/... at overlay time, same normalization Debian/
+      # Ubuntu apply via a real lib64->lib symlink (documented in that
+      # same upstream comment) -- just done per-file here instead of a
+      # single directory symlink, so real per-file conflict detection
+      # still applies if content under the two names ever disagrees.
+      case "$relpath" in
+        lib64/*) relpath="lib/''${relpath#lib64/}" ;;
+      esac
       dest="$fhsroot/usr/$relpath"
       mkdir -p "$(dirname "$dest")"
       rm -f "$dest"

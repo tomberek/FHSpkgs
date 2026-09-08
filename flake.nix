@@ -41,6 +41,7 @@
           patchelf-fhs = call ./patchelf-fhs.nix;
           binutils-fhs = call ./binutils-fhs.nix;
           gcc-fhs = call ./gcc-fhs.nix;
+          gcc-stage2-fhs = call ./gcc-stage2.nix;
           glibc-rebuild-fhs = call ./glibc-rebuild.nix;
           bootstrap-proof-fhs = call ./bootstrap-proof.nix;
           bootstrap-suite-fhs = call ./bootstrap-suite.nix;

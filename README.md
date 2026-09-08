@@ -332,7 +332,8 @@ Two more real, non-obvious bugs found here:
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
 `env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`,
-`bootstrap-proof-fhs`, `bootstrap-suite-fhs`, and `bootstrap-env-fhs`),
+`gcc-stage2-fhs`, `bootstrap-proof-fhs`, `bootstrap-suite-fhs`, and
+`bootstrap-env-fhs`),
 and two live shells built on the same shared `mkComposedShell`
 mechanism — materializing a composed package's store output into a
 writable scratch root and entering it via the same `unshare --user
@@ -385,6 +386,66 @@ Two real gaps this surfaced, both fixed in `mkComposedShell`:
    Also needed the same `/lib64/ld-linux-x86-64.so.2` symlink
    `toolchain.nix` sets up for its own in-build chroot (gcc's raw,
    unwrapped stage-1 output defaults to that interpreter path).
+
+## Self-hosting proof: `gcc-stage2.nix` — the self-built gcc compiles itself
+
+The classic self-hosting test, one level stronger than `bootstrap-suite.nix`
+(which shows the composed self-built gcc+binutils build *other* real
+software): compose `gcc-fhs.nix` + `binutils-fhs.nix` on top of the
+bootstrap toolchain (same overlay + hash-verification as
+`bootstrap-proof.nix`), then use the now-active, composed, self-built
+`/usr/bin/gcc`/`g++` to configure+build+install *real upstream gcc source
+a second time* — i.e. gcc genuinely compiling itself, not just compiling
+other packages.
+
+```
+nix build .#gcc-stage2-fhs
+```
+
+Real output from a passing run:
+```
+CONFIRMED: stage-1 self-built gcc (335917db...) and ld.bfd (74c82b26...) are genuinely active
+stage-1 gcc hash: 335917dbbefebe0dfdf59c2a7db46fd398e0c809c20bf9c7a53dc71d3a9b120e
+stage-2 gcc hash: 2a1e6faedcc2cdd26a41a8e2b049021e675d09dcd6cacf9b58ff4b81bf5abf0f
+CONFIRMED: stage-2 gcc is a distinct build from stage-1 (different hash), genuinely recompiled by the self-built compiler.
+hello from a binary compiled by the STAGE-2 self-hosted gcc
+stage2 g++ self-hosted
+GCC STAGE-2 SELF-COMPILATION SUCCEEDED: real gcc source compiled by a self-built gcc, and the resulting stage-2 compiler itself compiles+links+runs real C and C++ programs correctly
+```
+
+Two real, non-obvious bugs found and fixed to get here (both in the shared
+toolchain, so every package benefits, not just this one):
+
+1. **`--enable-static` missing from `gcc-fhs.nix`'s own configure.**
+   Without it, `libstdc++-v3`'s `Makefile` never even *attempts* to merge
+   `libsupc++convenience.la`'s real `operator new`/`delete` object files
+   (`del_op.o`, `new_op.o`, ...) into a real `libstdc++.a` — its "make a
+   non-installed convenience library, so that `--disable-static` may
+   work" fallback just copies the convenience archive verbatim instead.
+   nixpkgs' own gcc recipe passes this flag unconditionally
+   (`pkgs/development/compilers/gcc/common/configure-flags.nix`) — real
+   precedent, not a workaround invented for this harness.
+2. **`findutils` was never staged in `toolchain.nix`'s bootstrap tool
+   set** — a real, general gap, not gcc-specific. `--enable-static`
+   *alone* was not sufficient: even with the flag on, the exact same
+   "undefined reference to `operator delete(void*, unsigned long)'"
+   failure persisted. Direct inspection of the actual build tree (not
+   just the installed output) found the real cause: GNU libtool's own
+   archive-merge step (extracting a convenience `.a` via `ar --plugin
+   ... x`, then using `find` to discover what it just extracted) failed
+   with `libtool: line NNNN: find: command not found` — silently
+   swallowed by libtool (it doesn't propagate as a nonzero exit), so the
+   build "succeeded" with a genuinely incomplete `libstdc++.a` and zero
+   visible error. Invisible through every *other* package this composed
+   toolchain builds (all plain C, never touching libstdc++), and
+   surfaced only here, when gcc's own build-time generator tools
+   (`genmddeps`, `genconstants`, `genenums`) relink statically
+   (`-static-libstdc++ -static-libgcc`) against the incomplete archive.
+   Fixed by staging `findutils` alongside the other bootstrap tools in
+   `toolchain.nix` — confirmed via direct `ar t`/`nm` inspection of the
+   rebuilt `libstdc++.a` (all 191 objects present, including the sized-
+   delete operator `_ZdlPvm`), and via a clean rebuild of
+   `bootstrap-suite-fhs` and `env-fhs` with zero regressions.
 
 ## Known, deliberate scope limits
 

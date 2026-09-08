@@ -93,6 +93,7 @@ pkgs.stdenv.mkDerivation {
         --disable-libvtv \
         --enable-languages=c,c++ \
         --enable-shared \
+        --enable-static \
         --enable-threads=posix \
         --enable-__cxa_atexit \
         --enable-long-long \
@@ -113,6 +114,31 @@ pkgs.stdenv.mkDerivation {
     # matching this project's established pattern of scoping out
     # optional subsystems (gold/plugins/gprofng in binutils-fhs.nix)
     # rather than chasing every one of them.
+    # --enable-static: without this, libstdc++-v3's Makefile never
+    # attempts to merge libsupc++convenience.la's real operator-new/
+    # delete object files (del_op.o, del_ops.o, new_op.o, ...) into a
+    # real libstdc++.a at all (its "make a non-installed convenience
+    # library, so that --disable-static may work" fallback just copies
+    # the convenience .a verbatim instead of running the merge). But
+    # --enable-static alone was NOT sufficient -- confirmed via direct
+    # inspection of the actual build tree, not just the installed
+    # output: even with the flag on, libtool's own archive-merge step
+    # (its extract-then-recombine sequence, `ar --plugin ... x` followed
+    # by a `find`-based file-list step) failed with a real, silently-
+    # swallowed "libtool: line NNNN: find: command not found" -- because
+    # this harness's toolchain had never staged `findutils` at all (a
+    # real gap, not specific to gcc; fixed in toolchain.nix). libtool
+    # doesn't propagate that failure as a nonzero exit, so the build
+    # "succeeded" with an incomplete libstdc++.a and no visible error --
+    # invisible through every other package built by this composed
+    # toolchain (all pure C), and surfaced only when gcc-stage2.nix tried
+    # to relink gcc's OWN build-time generator tools statically
+    # (-static-libstdc++ -static-libgcc) against the incomplete archive:
+    # "undefined reference to `operator delete(void*, unsigned long)'".
+    # nixpkgs' own gcc recipe passes --enable-static unconditionally too
+    # (real precedent, not a workaround unique to this harness) --
+    # nixpkgs' toolchain always has `find` available, so it never hit
+    # this second bug.
     status=$?
     set -e
     if [ "$status" -ne 0 ]; then
