@@ -328,33 +328,63 @@ Two more real, non-obvious bugs found here:
    binutils overlay — this file's `$out` is meant to hold everything the
    suite builds, as one unit, unlike the per-package standalone files.
 
-## Real, runnable environment: `flake.nix` + `fhs-shell`
+## Real, runnable environment: `flake.nix` + `fhs-shell` / `bootstrap-shell`
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
 `env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`,
-`bootstrap-proof-fhs`, and `bootstrap-suite-fhs`), and a
-`fhs-shell` app / matching devshell that materializes `env-fhs`'s store
-output into a writable scratch root and enters it via the same
-`unshare --user --map-root-user --mount` + `chroot` mechanism used
-throughout this project's own builds:
+`bootstrap-proof-fhs`, `bootstrap-suite-fhs`, and `bootstrap-env-fhs`),
+and two live shells built on the same shared `mkComposedShell`
+mechanism — materializing a composed package's store output into a
+writable scratch root and entering it via the same `unshare --user
+--map-root-user --mount` + `chroot` mechanism used throughout this
+project's own builds:
 
 ```
-nix run .#fhs-shell                    # interactive
+nix run .#fhs-shell                    # every package, normal bootstrap gcc/binutils
 nix run .#fhs-shell -- -c 'grep --version'
+nix run .#bootstrap-shell              # every package, SELF-BUILT gcc/binutils
+nix run .#bootstrap-shell -- -c 'gcc --version'
 nix develop                            # fhs-shell is on PATH
 ```
 
-One real gap this surfaced: `/usr/bin/gcc`/`g++` are wrapper scripts
-that `exec` the real `gcc-unwrapped` at its literal Nix store path (gcc's
-own driver looks up `libexec/gcc/<target>/<version>/` relative to
-itself — `toolchain.nix` can't flatten this the way it does every other
-bootstrap tool). That's invisible during this project's own *builds*,
-since Nix's build sandbox always has `/nix` mounted — but `fhs-shell`
-materializes into a plain directory *outside* any Nix sandbox, where
-`/nix` genuinely isn't present. Confirmed via a real failure (`gcc: ...
-No such file or directory` for its own store path) and fixed by
-bind-mounting `/nix/store` (read-only) into the chroot alongside the
-existing `/dev/null` bind-mount.
+`bootstrap-shell` is `fhs-shell`'s counterpart for `bootstrap-env.nix`
+(same build as `bootstrap-suite.nix`, but installing the full `/usr`
+tree instead of a diff) — every binary in it, gcc and binutils included,
+was built by the self-built toolchain, not borrowed from nixpkgs (glibc
+itself is still the bootstrap copy; see `bootstrap-env.nix`'s own header
+comment for why). This is the difference between "the build log says it
+passed" and "you can actually use it" — `nix run .#bootstrap-shell -- -c
+'gcc -o t t.c && ./t'` really compiles and runs a program with the
+self-built compiler, interactively, outside any build sandbox.
+
+Two real gaps this surfaced, both fixed in `mkComposedShell`:
+
+1. `/usr/bin/gcc`/`g++` are wrapper scripts that `exec` the real
+   `gcc-unwrapped` at its literal Nix store path (gcc's own driver looks
+   up `libexec/gcc/<target>/<version>/` relative to itself —
+   `toolchain.nix` can't flatten this the way it does every other
+   bootstrap tool). That's invisible during this project's own
+   *builds*, since Nix's build sandbox always has `/nix` mounted — but
+   these shells materialize into a plain directory *outside* any Nix
+   sandbox, where `/nix` genuinely isn't present. Confirmed via a real
+   failure (`gcc: ... No such file or directory` for its own store
+   path) and fixed by bind-mounting `/nix/store` (read-only) into the
+   chroot alongside the existing `/dev/null` bind-mount.
+2. `bootstrap-shell` specifically: every binary built by the composed,
+   *unwrapped* self-built gcc (the wrapped `/usr/bin/gcc` that injects
+   `-Wl,-rpath,/usr/lib` for every other build was itself overwritten by
+   `gcc-fhs`'s own raw binary in this composition) carries **no RPATH at
+   all** — confirmed on both `bash` itself (`chroot` failed outright:
+   `"failed to run command '/usr/bin/bash': No such file or directory"`,
+   the loader unable to resolve `libreadline.so.8` before a single line
+   of its script runs) and `pigz` (`"libz.so.1: cannot open shared
+   object file"`). Fixed the same way `toolchain.nix`'s `run()` already
+   fixed the identical ordering bug: export `LD_LIBRARY_PATH=/usr/lib`
+   in the *outer* shell, before `chroot` `exec`s into the target bash —
+   setting it inside that bash's own script is too late by construction.
+   Also needed the same `/lib64/ld-linux-x86-64.so.2` symlink
+   `toolchain.nix` sets up for its own in-build chroot (gcc's raw,
+   unwrapped stage-1 output defaults to that interpreter path).
 
 ## Known, deliberate scope limits
 
