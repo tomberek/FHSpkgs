@@ -235,10 +235,54 @@ bootstrap toolchain itself (gcc's `make install` tars up headers with a
 plain `tar -cf -` pipeline *inside* the chroot, not the outer sandbox's
 tar used only to unpack sources before chrooting).
 
+## Capstone: `bootstrap-proof.nix` — the self-built toolchain building real software
+
+Each of `binutils-fhs.nix`/`glibc-rebuild.nix`/`gcc-fhs.nix` proves its
+own piece works standalone — but that's not the same as proving they
+work *together*, as an actual toolchain. `bootstrap-proof.nix` composes
+self-built gcc (`gcc-fhs.nix`) and self-built binutils
+(`binutils-fhs.nix`) into one chroot, overlaid on the normal bootstrap
+staging, then uses *only* that composed compiler+linker to build a real
+third-party package (zlib) from real source, end to end.
+
+Deliberately excludes `glibc-rebuild.nix`'s self-built glibc from this
+composition: `gcc-fhs`/`binutils-fhs` were themselves built using the
+*bootstrap* toolchain's glibc as their own C library at build time (see
+each file's own `buildPhase`), so their binaries are ABI-compatible with
+that bootstrap glibc, not necessarily with `glibc-rebuild`'s separately-
+built, real-upstream-unpatched one — a real, already-confirmed hazard
+this session hit twice (`GLIBC_ABI_DT_X86_64_PLT`,
+`GLIBC_ABI_GNU2_TLS` version-node mismatches, each a real crash when
+mixed). Composing gcc+binutils only (both built against the *same*
+glibc) proves the real thing this capstone is about without walking
+into that hazard.
+
+Verification goes beyond "the build exited 0": the gcc and `ld.bfd`
+binaries actually active in the chroot during zlib's build are
+SHA-256-hashed and compared directly against `gcc-fhs.nix`'s and
+`binutils-fhs.nix`'s own independent store outputs, confirming the
+composed pieces genuinely ran — not a silent fallback to the bootstrap
+copies underneath. Confirmed byte-identical for both. zlib's own real
+`configure && make && make install` then succeeds using only that
+composed toolchain, and the resulting `libz.so` passes the same
+compile+link+run smoke test every other package here uses (zero
+`/nix/store` references in the produced binary, real `zlibVersion()`
+call succeeds).
+
+One real bug found composing the two outputs, fixed in
+`bootstrap-proof.nix` itself: the bootstrap toolchain's own `/usr/bin/ld`
+is a *symlink* to `ld.bfd`, while `binutils-fhs`'s own output has both
+as real (hardlinked) files — a blanket `cp -a src/. dst/` overlay onto
+that existing symlink corrupts both (GNU `cp` writes *through* an
+existing destination symlink rather than replacing it). Fixed by
+reusing `env-fhs.nix`'s own established overwrite pattern
+(`rm -f "$dest"` before each file, not a directory-level copy).
+
 ## Real, runnable environment: `flake.nix` + `fhs-shell`
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
-`env-fhs`, the composed union, `glibc-rebuild-fhs`, and `gcc-fhs`), and a
+`env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`, and
+`bootstrap-proof-fhs`), and a
 `fhs-shell` app / matching devshell that materializes `env-fhs`'s store
 output into a writable scratch root and enters it via the same
 `unshare --user --map-root-user --mount` + `chroot` mechanism used
