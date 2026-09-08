@@ -332,8 +332,8 @@ Two more real, non-obvious bugs found here:
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
 `env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`,
-`gcc-stage2-fhs`, `bootstrap-proof-fhs`, `bootstrap-suite-fhs`, and
-`bootstrap-env-fhs`),
+`gcc-stage2-fhs`, `bootstrap-proof-fhs`, `full-toolchain-proof-fhs`,
+`bootstrap-suite-fhs`, and `bootstrap-env-fhs`),
 and two live shells built on the same shared `mkComposedShell`
 mechanism — materializing a composed package's store output into a
 writable scratch root and entering it via the same `unshare --user
@@ -446,6 +446,51 @@ toolchain, so every package benefits, not just this one):
    rebuilt `libstdc++.a` (all 191 objects present, including the sized-
    delete operator `_ZdlPvm`), and via a clean rebuild of
    `bootstrap-suite-fhs` and `env-fhs` with zero regressions.
+
+## Closing the gap: `full-toolchain-proof.nix` — self-built gcc+binutils+glibc, mutually compatible
+
+`bootstrap-proof.nix` deliberately excluded self-built glibc
+(`glibc-rebuild.nix`) from its composition — gcc-fhs/binutils-fhs were
+themselves built using the *bootstrap* glibc as their C library, so
+mixing in glibc-rebuild's separately-built, unpatched-upstream glibc was
+a real, previously-confirmed ABI hazard (`GLIBC_ABI_DT_X86_64_PLT`,
+`GLIBC_ABI_GNU2_TLS` version-node mismatches — each a genuine crash, not
+hypothetical).
+
+Investigating this surfaced a real, pre-existing regression first:
+`glibc-rebuild.nix`'s own standalone self-test had broken independently
+of anything else in this session — nixpkgs' glibc pin had drifted
+forward and now backports a real upstream commit
+(`GLIBC_ABI_GNU2_TLS`, [BZ #33129]) that plain 2.42.0 doesn't define, so
+the bootstrap toolchain's own `cc1` (linked against the bootstrap
+`libmpfr.so.6`, which expects that version node) broke the moment the
+self-built glibc occupied `/usr/lib`. Root-caused via direct inspection
+(`nm -D --with-symbol-versions`, `objdump -T`) and nixpkgs' own patch
+history, not assumed. **Fixed** by applying the same real upstream
+commit range nixpkgs itself carries
+(`pkgs/development/libraries/glibc/2.42-master.patch` — confirmed via
+reading it to contain zero NixOS-specific patches, i.e. real
+`glibc.git` history between the 2.42.0 tarball and nixpkgs' pin, not a
+workaround invented for this harness) before building. This also turned
+out to be exactly what closes the original ABI gap: once glibc-rebuild's
+loader defines the same version nodes the bootstrap tools already
+expect, composing all three self-built pieces together works.
+
+```
+nix build .#full-toolchain-proof-fhs
+```
+
+Real output from a passing run — self-built gcc+binutils overlay first,
+then self-built glibc on top, each step hash-verified against its own
+standalone output, then a real third-party package (zlib) built and run
+using *only* the fully self-built toolchain:
+```
+CONFIRMED: gcc (335917db...) and ld.bfd (74c82b26...) are genuinely the self-built outputs
+CONFIRMED: libc.so.6 (aa99c32b...) is genuinely the self-built glibc output
+GNU bash, version 5.3.15(1)-release (x86_64-pc-linux-gnu)
+zlibVersion=1.3.2
+FULL TOOLCHAIN PROOF SUCCEEDED: self-built gcc+binutils+glibc are mutually ABI-compatible and coexist with the bootstrap tools; real zlib built and run using ONLY the fully self-built toolchain
+```
 
 ## Known, deliberate scope limits
 
