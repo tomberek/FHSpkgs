@@ -355,6 +355,34 @@ WRAP
     done < <(find "$fhsroot/usr" -type f -o -type l)
   }
 
+  # overlayPackage(outpath) -- overlays another package's own $out/usr
+  # tree (e.g. gcc-fhs.nix's or binutils-fhs.nix's output) on top of
+  # THIS chroot's /usr, file by file -- NOT a blanket `cp -a src/.
+  # dst/`. The bootstrap toolchain's own /usr/bin/ld is a SYMLINK to
+  # ld.bfd, while binutils-fhs's own from-source output has `ld` as a
+  # real hardlink of `ld.bfd` (not a symlink) -- overlaying that onto
+  # an existing symlink destination via plain `cp -a` corrupts both
+  # (confirmed via a real repro composing gcc-fhs+binutils-fhs in
+  # bootstrap-proof.nix: GNU cp, when a source regular file's
+  # destination already exists as a symlink, WRITES THROUGH that
+  # symlink rather than replacing it, silently scrambling which file
+  # ends up with which content). Same overwrite hazard env-fhs.nix's
+  # own `unionPackage` already handles correctly (via `rm -f "$dest"`
+  # before each write) -- this is that same pattern, extracted so
+  # every caller composing self-built toolchain pieces reuses it
+  # rather than re-deriving it.
+  overlayPackage() {
+    __op_out="$1"
+    while read -r f; do
+      relpath=$(echo "$f" | sed "s|^$__op_out/usr/||")
+      dest="$fhsroot/usr/$relpath"
+      mkdir -p "$(dirname "$dest")"
+      rm -f "$dest"
+      cp -a "$f" "$dest"
+    done < <(find "$__op_out/usr" -type f -o -type l)
+    chmod -R u+w "$fhsroot/usr"
+  }
+
   # ==========================================================================
   # Everything below this point builds real packages from real SOURCE
   # (never a prebuilt nixpkgs binary) using the bootstrap toolchain staged
@@ -409,10 +437,25 @@ WRAP
     # change resolution for any binary that already has a working
     # RPATH (every other package here), only for rpath-less ones like
     # xgcc's stage-1 conftest probes.
+    #
+    # CRITICAL ORDERING: LD_LIBRARY_PATH must be exported in the OUTER
+    # bash, BEFORE `chroot ... exec`s into /usr/bin/bash -- not inside
+    # that inner bash's own -c script. Confirmed via a real failure
+    # composing gcc-fhs+binutils-fhs (bootstrap-suite.nix): once
+    # bash-fhs's own build overwrites /usr/bin/bash with a binary
+    # compiled by the composed, UNWRAPPED self-built gcc (no automatic
+    # -Wl,-rpath,/usr/lib injection, unlike the normal wrapped
+    # /usr/bin/gcc every other package here uses), that new bash has
+    # NO rpath at all -- so the loader must resolve ITS OWN
+    # dependencies (libdl.so.2) at exec time, before a single line of
+    # its -c script body ever runs. Setting LD_LIBRARY_PATH inside that
+    # same script is too late by definition; exporting it in the outer
+    # bash (env vars survive exec) fixes the ordering.
     export __run_fhsroot="$fhsroot"
     unshare --user --map-root-user --mount -- bash -c '
       mount --bind /dev/null "$__run_fhsroot/dev/null"
-      exec chroot "$__run_fhsroot" /usr/bin/bash -c "cd \"\$1\"; shift; export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp LD_LIBRARY_PATH=/usr/lib; unset CONFIG_SHELL; exec \"\$@\"" -- "$@"
+      export LD_LIBRARY_PATH=/usr/lib
+      exec chroot "$__run_fhsroot" /usr/bin/bash -c "cd \"\$1\"; shift; export PATH=/usr/bin TMPDIR=/tmp TMP=/tmp TEMP=/tmp; unset CONFIG_SHELL; exec \"\$@\"" -- "$@"
     ' -- "$__run_wd" "$@"
   }
 

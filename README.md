@@ -276,13 +276,43 @@ as real (hardlinked) files — a blanket `cp -a src/. dst/` overlay onto
 that existing symlink corrupts both (GNU `cp` writes *through* an
 existing destination symlink rather than replacing it). Fixed by
 reusing `env-fhs.nix`'s own established overwrite pattern
-(`rm -f "$dest"` before each file, not a directory-level copy).
+(`rm -f "$dest"` before each file, not a directory-level copy) —
+promoted into shared `toolchain.nix` as `overlayPackage()` once a
+second file needed the same composition.
+
+## Extending the proof: `bootstrap-suite.nix` — the whole userland set, not just one library
+
+`bootstrap-proof.nix` shows the composed toolchain builds *a* real
+library. `bootstrap-suite.nix` asks the stronger question: is it a
+general-purpose toolchain, or one that happens to work for zlib
+specifically? It rebuilds all 16 real final-stdenv tools this project
+already proved once against the *bootstrap* toolchain (xz, diffutils,
+findutils, gawk, patch, attr, acl, gnugrep, file, gnutar, gzip, ed,
+bash, gnused, coreutils, patchelf) — using *only* the composed
+self-built gcc+binutils, with the exact real recipes and real functional
+smoke tests each standalone `<pkg>-fhs.nix` file already established
+(not re-derived). Confirmed: all 16 pass, including the same honest
+`acl` skip (no ACL support on this build sandbox's filesystem) every
+other file in this project already documents — not a new gap.
+
+One more real, non-obvious bug found here, fixed in shared
+`toolchain.nix`'s `run()`: once this suite's own from-source `bash`
+build overwrites `/usr/bin/bash` with a binary compiled by the composed,
+*unwrapped* self-built gcc (no automatic `-Wl,-rpath,/usr/lib`
+injection, unlike the normal wrapped `/usr/bin/gcc` every other package
+here uses), that new bash has no RPATH at all — so the ELF loader must
+resolve *bash's own* dependency on `libdl.so.2` at `exec` time, before a
+single line of its own script body runs. The existing `LD_LIBRARY_PATH`
+fallback (added for gcc's stage-1 `xgcc`) was set *inside* that same
+`/usr/bin/bash -c "..."` invocation — too late by construction. Fixed by
+exporting it in the *outer* `unshare` bash instead, before `chroot`
+`exec`s into the target bash (environment variables survive `exec`).
 
 ## Real, runnable environment: `flake.nix` + `fhs-shell`
 
 `flake.nix` exposes every package as `packages.<system>.<pkg>-fhs` (plus
-`env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`, and
-`bootstrap-proof-fhs`), and a
+`env-fhs`, the composed union, `glibc-rebuild-fhs`, `gcc-fhs`,
+`bootstrap-proof-fhs`, and `bootstrap-suite-fhs`), and a
 `fhs-shell` app / matching devshell that materializes `env-fhs`'s store
 output into a writable scratch root and enters it via the same
 `unshare --user --map-root-user --mount` + `chroot` mechanism used

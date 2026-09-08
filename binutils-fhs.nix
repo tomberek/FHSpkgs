@@ -71,10 +71,24 @@ EOF
     echo "--- run it ---"
     run /tmp /tmp/bt
     echo "--- sanity: nm/objdump/strip/ar/ranlib on the result, using our OWN just-built binutils ---"
-    run /tmp /usr/bin/nm /tmp/bt | head -3
-    run /tmp /usr/bin/objdump -d /tmp/bt | head -3
-    run /tmp /usr/bin/ar --version | head -1
-    run /tmp /usr/bin/ranlib --version | head -1
+    # `run ... | head -N` under `set -e`: if head closes the pipe after
+    # its N lines, the writer can receive SIGPIPE and exit 141, failing
+    # the whole script -- confirmed via a real, non-deterministic
+    # failure (passed every prior run this session, then failed once
+    # composing gcc-fhs+binutils-fhs in bootstrap-suite.nix). Redirect
+    # to a file and head THAT instead, so the pipe's write side is never
+    # the thing that can be closed early. `run`'s own stdout redirect
+    # here happens on the OUTER build script (run is a plain bash
+    # function call, `>` binds to ITS stdout) -- so the file lands at
+    # the outer $TMPDIR, not inside the chroot at $fhsroot/tmp.
+    run /tmp /usr/bin/nm /tmp/bt > /tmp/nm.out 2>&1
+    head -3 /tmp/nm.out
+    run /tmp /usr/bin/objdump -d /tmp/bt > /tmp/objdump.out 2>&1
+    head -3 /tmp/objdump.out
+    run /tmp /usr/bin/ar --version > /tmp/ar.out 2>&1
+    head -1 /tmp/ar.out
+    run /tmp /usr/bin/ranlib --version > /tmp/ranlib.out 2>&1
+    head -1 /tmp/ranlib.out
 
     echo "BINUTILS FHS BUILD SUCCEEDED: assembled+linked+inspected a real binary with our own from-source as/ld/nm/objdump/ar/ranlib"
   '';

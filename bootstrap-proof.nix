@@ -44,30 +44,6 @@ pkgs.stdenv.mkDerivation {
 
     ${toolchain}
 
-    # Overlay a package's own /usr tree onto the chroot, file by file --
-    # NOT a blanket `cp -a src/. dst/`. The bootstrap toolchain's own
-    # /usr/bin/ld is a SYMLINK to ld.bfd (confirmed: `ld -> ld.bfd`),
-    # while binutils-fhs's own from-source output has `ld` as a real
-    # hardlink of `ld.bfd` (not a symlink) -- overlaying that onto an
-    # existing symlink destination via plain `cp -a` corrupts both
-    # (confirmed via a real repro: GNU cp, when a source regular file's
-    # destination already exists as a symlink, WRITES THROUGH that
-    # symlink rather than replacing it, silently scrambling which file
-    # ends up with which content). Same overwrite hazard `env-fhs.nix`'s
-    # `unionPackage` already handles correctly (via `rm -f "$dest"`
-    # before each write) -- reuse that exact pattern here.
-    overlayPackage() {
-      __op_out="$1"
-      while read -r f; do
-        relpath=$(echo "$f" | sed "s|^$__op_out/usr/||")
-        dest="$fhsroot/usr/$relpath"
-        mkdir -p "$(dirname "$dest")"
-        rm -f "$dest"
-        cp -a "$f" "$dest"
-      done < <(find "$__op_out/usr" -type f -o -type l)
-      chmod -R u+w "$fhsroot/usr"
-    }
-
     echo "=== overlaying self-built gcc (gcc-fhs.nix output) on top of the bootstrap toolchain ==="
     overlayPackage ${gccFhs}
 

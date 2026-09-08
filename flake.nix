@@ -43,6 +43,7 @@
           gcc-fhs = call ./gcc-fhs.nix;
           glibc-rebuild-fhs = call ./glibc-rebuild.nix;
           bootstrap-proof-fhs = call ./bootstrap-proof.nix;
+          bootstrap-suite-fhs = call ./bootstrap-suite.nix;
 
           # The union of every package above (plus the bootstrap runtime
           # layer) into one combined /usr tree. See env-fhs.nix / README.md
