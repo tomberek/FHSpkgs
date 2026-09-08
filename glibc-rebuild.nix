@@ -29,10 +29,28 @@ let
   python3Minimal = pkgs.python3Minimal;
   pythonVersion = python3Minimal.pythonVersion;
   gnum4 = pkgs.gnum4;
+  # Real upstream glibc git commits between the 2.42.0 release tarball and
+  # nixpkgs' current glibc pin (nixpkgs' own comment on this same file:
+  # `git show --minimal --reverse glibc-2.42.. > 2.42-master.patch` --
+  # i.e. this is upstream glibc.git history, not a NixOS-specific patch;
+  # confirmed by reading it: zero references to ld.so.cache/ld.so.conf,
+  # the actual NixOS-specific patches nixpkgs applies separately and
+  # which this file has always deliberately excluded). Needed here for a
+  # real, non-NixOS-specific reason: nixpkgs' bootstrap gcc (used to
+  # build THIS glibc) links its own libmpfr.so.6 against a newer glibc
+  # whose loader defines the post-2.42.0 GLIBC_ABI_GNU2_TLS version node
+  # (upstream commit 3970785, "x86-64: Add GLIBC_ABI_GNU2_TLS version
+  # [BZ #33129]") -- confirmed via a real failure: once this self-built,
+  # plain-2.42.0 glibc occupied /usr/lib, the bootstrap toolchain's own
+  # cc1 broke with "version `GLIBC_ABI_GNU2_TLS' not found (required by
+  # .../libmpfr.so.6)". Applying the same real commit range nixpkgs
+  # itself carries keeps this glibc's loader ABI-compatible with the
+  # bootstrap tools still running alongside it in the same chroot.
+  glibcMasterPatch = "${pkgs.path}/pkgs/development/libraries/glibc/2.42-master.patch";
 in
 pkgs.stdenv.mkDerivation {
   name = "glibc-rebuild-fhs";
-  nativeBuildInputs = [ pkgs.util-linux pkgs.coreutils pkgs.patchelf pkgs.gnutar pkgs.gzip pkgs.gnumake ];
+  nativeBuildInputs = [ pkgs.util-linux pkgs.coreutils pkgs.patchelf pkgs.gnutar pkgs.gzip pkgs.gnumake pkgs.gnupatch ];
   dontUnpack = true;
   dontFixup = true;
 
@@ -152,13 +170,23 @@ pkgs.stdenv.mkDerivation {
     snapshotToolchain
 
     # ------------------------------------------------------------------
-    # Real upstream glibc source, UNMODIFIED -- no nixpkgs patches
-    # applied. Out-of-tree build (glibc's own configure REQUIRES this).
+    # Real upstream glibc source -- NONE of nixpkgs' NixOS-specific
+    # patches applied (dont-use-system-ld-so-cache.patch etc., the whole
+    # point of this file). The one exception, applied below, is
+    # 2.42-master.patch -- itself just real upstream glibc.git commits
+    # nixpkgs mechanically captured between the 2.42.0 tarball and its
+    # current pin, needed for ABI compatibility (see glibcMasterPatch's
+    # own comment above). Out-of-tree build (glibc's own configure
+    # REQUIRES this).
     # ------------------------------------------------------------------
     srcdir=$fhsroot/tmp/glibc-src
     builddir=$fhsroot/tmp/glibc-build
     mkdir -p "$srcdir"
     tar xf ${pkgs.glibc.src} -C "$srcdir" --strip-components=1
+
+    echo "--- applying real upstream glibc commits (2.42.0 tarball -> nixpkgs' current pin) for ABI compatibility with the bootstrap toolchain ---"
+    patch -d "$srcdir" -p1 < ${glibcMasterPatch}
+
     mkdir -p "$builddir"
 
     cat > "$builddir/configparms" <<'EOF'
