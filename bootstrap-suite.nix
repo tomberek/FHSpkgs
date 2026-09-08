@@ -2,14 +2,14 @@
 
 # Extends bootstrap-proof.nix's capstone from "one third-party library"
 # to "the whole package set" -- proving the composed, self-built
-# gcc+binutils is a general-purpose toolchain, not one that happens to
-# work for a single trivial library. Rebuilds all 18 real,
-# non-toolchain packages this project has ever built (zlib, pigz, and
-# the 16 final-stdenv tools -- see e.g. xz-fhs.nix, coreutils-fhs.nix,
-# ...), this time using ONLY the composed self-built gcc (gcc-fhs.nix)
-# + self-built binutils (binutils-fhs.nix), with the exact same real
-# upstream recipes (configure flags read from each existing
-# <pkg>-fhs.nix file, not re-derived) and the exact same real
+# toolchain is general-purpose, not one that happens to work for a
+# single trivial library. Rebuilds all 18 real, non-toolchain packages
+# this project has ever built (zlib, pigz, and the 16 final-stdenv
+# tools -- see e.g. xz-fhs.nix, coreutils-fhs.nix, ...), this time using
+# ONLY the composed, FULLY self-built gcc+binutils+glibc (see
+# bootstrap-suite-build.nix and full-toolchain-proof.nix), with the
+# exact same real upstream recipes (configure flags read from each
+# existing <pkg>-fhs.nix file, not re-derived) and the exact same real
 # functional smoke tests -- so a pass here is a direct, apples-to-apples
 # confirmation that the self-built toolchain reproduces every
 # previously-proven build in this project.
@@ -20,11 +20,12 @@
 # script (bootstrap-suite-build.nix) but installs the FULL /usr tree
 # instead, for a runnable fhs-shell-style environment.
 #
-# Same ABI-compatibility scoping as bootstrap-proof.nix: composes
-# gcc-fhs + binutils-fhs only (both built against the BOOTSTRAP glibc,
-# so mutually ABI-compatible), deliberately excluding
-# glibc-rebuild.nix's separately-built glibc for the same
-# already-confirmed version-mismatch reasons documented there.
+# Composes gcc-fhs + binutils-fhs + glibc-rebuild.nix, all three mutually
+# ABI-compatible -- see full-toolchain-proof.nix's own header for the
+# real regression that had to be fixed (glibc-rebuild.nix lacking a
+# real upstream ABI-version commit nixpkgs' own pin already carries)
+# before this composition was safe. Earlier versions of this file
+# excluded glibc entirely for that reason; it no longer needs to.
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };

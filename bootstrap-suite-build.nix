@@ -1,12 +1,21 @@
 { pkgs }:
 
-# Shared build script for the "compose self-built gcc+binutils, then
-# rebuild all 18 real non-toolchain packages" step -- used by BOTH
-# bootstrap-suite.nix (installPhase = installOnlyNew, a diff-only
-# output proving the composition works) and bootstrap-env.nix
-# (installPhase = cp -a, a full runnable /usr tree for fhs-shell).
-# Factored out here instead of duplicated so a future fix only needs to
-# happen once.
+# Shared build script for the "compose the FULLY self-built toolchain
+# (gcc+binutils+glibc), then rebuild all 18 real non-toolchain packages"
+# step -- used by BOTH bootstrap-suite.nix (installPhase =
+# installOnlyNew, a diff-only output proving the composition works) and
+# bootstrap-env.nix (installPhase = cp -a, a full runnable /usr tree for
+# bootstrap-shell). Factored out here instead of duplicated so a future
+# fix only needs to happen once.
+#
+# Composes all three self-built toolchain pieces, same order and same
+# ABI-compatibility reasoning as full-toolchain-proof.nix: gcc+binutils
+# first, then glibc-rebuild.nix (with its own ABI-compatibility fix --
+# see that file's glibcMasterPatch comment) on top. Earlier versions of
+# this file deliberately excluded glibc for the ABI-mismatch reasons
+# documented in bootstrap-proof.nix's header; full-toolchain-proof.nix
+# resolved that by fixing glibc-rebuild.nix itself, so every consumer of
+# THIS shared script now gets the fully self-built toolchain too.
 #
 # Returns a bash snippet, spliced into a derivation's buildPhase. Same
 # calling convention as toolchain.nix: assumes $fhsroot is already set
@@ -15,6 +24,7 @@
 let
   gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
   binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
+  glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
 in
 ''
   echo "=== overlaying self-built gcc + binutils on top of the bootstrap toolchain ==="
@@ -29,6 +39,19 @@ in
   ld_expected=$(sha256sum "${binutilsFhs}/usr/bin/ld.bfd" | cut -d' ' -f1)
   [ "$ld_active" = "$ld_expected" ] || { echo "FAILED: ld.bfd mismatch"; exit 1; }
   echo "CONFIRMED: composed gcc ($gcc_active) and ld.bfd ($ld_active) are genuinely active"
+
+  echo "=== overlaying self-built glibc (glibc-rebuild.nix output, ABI-fixed) on top ==="
+  overlayPackage ${glibcRebuild}
+
+  echo "=== VERIFY: active libc.so.6 is byte-identical to glibc-rebuild's own output ==="
+  libc_active=$(sha256sum "$fhsroot/usr/lib/libc.so.6" | cut -d' ' -f1)
+  libc_expected=$(sha256sum "${glibcRebuild}/usr/lib/libc.so.6" | cut -d' ' -f1)
+  [ "$libc_active" = "$libc_expected" ] || { echo "FAILED: libc.so.6 mismatch"; exit 1; }
+  echo "CONFIRMED: libc.so.6 ($libc_active) is genuinely the self-built glibc output"
+
+  echo "=== sanity: composed gcc/ld/bash still work with the self-built glibc now in place ==="
+  run /tmp /usr/bin/gcc --version | head -1
+  run /tmp bash --version | head -1
 
   snapshotToolchain
 
@@ -155,5 +178,5 @@ PATCHEOF
   run /tmp bash -c "/usr/bin/patchelf --print-rpath /tmp/patchelf-target | grep -q /usr/lib"
   echo "patchelf: FUNCTIONAL CHECK OK"
 
-  echo "BOOTSTRAP SUITE SUCCEEDED: all 18 real packages (zlib, pigz, and the 16 final-stdenv tools) rebuilt from source, using ONLY the composed self-built gcc+binutils, every real functional check passed"
+  echo "BOOTSTRAP SUITE SUCCEEDED: all 18 real packages (zlib, pigz, and the 16 final-stdenv tools) rebuilt from source, using ONLY the fully self-built gcc+binutils+glibc, every real functional check passed"
 ''

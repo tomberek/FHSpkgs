@@ -290,13 +290,21 @@ proved once against the *bootstrap* toolchain — zlib, pigz (the
 dependency-chaining pair), and the 16 final-stdenv tools (xz,
 diffutils, findutils, gawk, patch, attr, acl, gnugrep, file, gnutar,
 gzip, ed, bash, gnused, coreutils, patchelf) — using *only* the
-composed self-built gcc+binutils, with the exact real recipes and real
+composed self-built toolchain, with the exact real recipes and real
 functional smoke tests each standalone `<pkg>-fhs.nix` file already
 established (not re-derived). Confirmed: all 18 pass, including the
 same honest `acl` skip (no ACL support on this build sandbox's
 filesystem) every other file in this project already documents — not a
 new gap. This is 100% of the non-toolchain package set this project has
 ever built, proven again end to end with a self-built compiler+linker.
+
+Originally composed only self-built gcc+binutils (glibc excluded for the
+ABI-mismatch reasons `bootstrap-proof.nix`'s header documents). Since
+`full-toolchain-proof.nix` closed that gap, `bootstrap-suite-build.nix`
+(the shared script both this file and `bootstrap-env.nix` use) now
+composes the fully self-built gcc+binutils+glibc — confirmed via the
+same hash-verification pattern, and all 18 functional checks still pass
+unchanged with glibc included too.
 
 Two more real, non-obvious bugs found here:
 
@@ -350,13 +358,17 @@ nix develop                            # fhs-shell is on PATH
 
 `bootstrap-shell` is `fhs-shell`'s counterpart for `bootstrap-env.nix`
 (same build as `bootstrap-suite.nix`, but installing the full `/usr`
-tree instead of a diff) — every binary in it, gcc and binutils included,
-was built by the self-built toolchain, not borrowed from nixpkgs (glibc
-itself is still the bootstrap copy; see `bootstrap-env.nix`'s own header
-comment for why). This is the difference between "the build log says it
-passed" and "you can actually use it" — `nix run .#bootstrap-shell -- -c
-'gcc -o t t.c && ./t'` really compiles and runs a program with the
-self-built compiler, interactively, outside any build sandbox.
+tree instead of a diff) — every binary in it, gcc, binutils, *and glibc*
+included, was built by the fully self-built toolchain, not borrowed from
+nixpkgs (see `full-toolchain-proof.nix` for how the earlier gcc+binutils-
+only composition's ABI gap was closed). This is the difference between
+"the build log says it passed" and "you can actually use it" — `nix run
+.#bootstrap-shell -- -c 'gcc -o t t.c && ./t'` really compiles and runs a
+program with the self-built compiler linked against the self-built
+glibc, interactively, outside any build sandbox. Confirmed directly:
+`strings /usr/lib/libc.so.6 | grep "^GNU C Library"` inside the shell
+reports the real self-built version string, and a compiled test binary's
+`readelf -d` shows zero `/nix/store` references.
 
 Two real gaps this surfaced, both fixed in `mkComposedShell`:
 

@@ -198,10 +198,10 @@
             program = "${fhsShell}/bin/fhs-shell";
           };
           # Same idea as fhs-shell, but composed ENTIRELY from
-          # bootstrap-env-fhs's output -- i.e. every binary in this
-          # tree (except glibc itself, still the bootstrap copy; see
-          # bootstrap-env.nix's own header comment) was built by the
-          # self-built gcc+binutils, not borrowed from nixpkgs. Proves
+          # bootstrap-env-fhs's output -- every binary in this tree,
+          # glibc included, was built by the fully self-built
+          # gcc+binutils+glibc toolchain (see full-toolchain-proof.nix),
+          # not borrowed from nixpkgs. Proves
           # the self-hosted toolchain's output is directly usable
           # interactively, not just verifiable from a build log.
           bootstrap-shell = {
