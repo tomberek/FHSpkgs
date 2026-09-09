@@ -45,6 +45,7 @@
           glibc-rebuild-fhs = call ./glibc-rebuild.nix;
           bootstrap-proof-fhs = call ./bootstrap-proof.nix;
           full-toolchain-proof-fhs = call ./full-toolchain-proof.nix;
+          circular-bootstrap-proof-fhs = call ./circular-bootstrap-proof.nix;
           bootstrap-suite-fhs = call ./bootstrap-suite.nix;
           bootstrap-env-fhs = call ./bootstrap-env.nix;
 

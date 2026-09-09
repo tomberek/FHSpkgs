@@ -504,6 +504,50 @@ zlibVersion=1.3.2
 FULL TOOLCHAIN PROOF SUCCEEDED: self-built gcc+binutils+glibc are mutually ABI-compatible and coexist with the bootstrap tools; real zlib built and run using ONLY the fully self-built toolchain
 ```
 
+## True circular self-host: `circular-bootstrap-proof.nix`
+
+The strongest self-hosting claim this project makes. `gcc-stage2.nix`
+proved gcc alone can be recompiled by a self-built gcc+binutils — but
+that self-built gcc was still linked against, and running against, the
+*bootstrap* glibc as its own runtime. This file goes further: using the
+FULLY self-built toolchain from `full-toolchain-proof.nix` (gcc+
+binutils+glibc, all mutually ABI-compatible), it rebuilds **binutils,
+glibc, AND gcc** from real upstream source a second time — every core
+toolchain piece, compiled and run by the self-built toolchain rather
+than the bootstrap one.
+
+```
+nix build .#circular-bootstrap-proof-fhs
+```
+
+A real, non-obvious simplification found while building this: the
+composed toolchain's raw, *unwrapped* `/usr/bin/gcc` (gcc-fhs's own
+binary, overlaid in place of the bootstrap's wrapped `gcc`) injects
+**neither** an RPATH on normal links **nor** a spurious
+`-dynamic-linker` flag on a `-static` link — confirmed directly via
+`readelf` before writing this file. That means `glibc-rebuild.nix`'s own
+`gcc-norpath` wrapper (built specifically to avoid the bootstrap
+toolchain's wrapped gcc injecting exactly those two things — see that
+file's own header comment) is unnecessary here: the composed self-built
+gcc can be used directly as `CC` for glibc's second build.
+
+Real output from a passing run — four distinct hash-verified stages
+(compose the toolchain, rebuild binutils, rebuild glibc, rebuild gcc),
+each stage's hash differing from the last (confirming genuine
+recompilation, not a no-op), ending with a real compile+link+run test:
+```
+CONFIRMED: stage-1 gcc (335917db...) / ld.bfd (74c82b26...) / libc.so.6 (aa99c32b...) all genuinely active
+stage-1 ld.bfd hash: 74c82b26...
+stage-2 ld.bfd hash: 4151125c...
+stage-1 libc.so.6 hash: aa99c32b...
+stage-2 libc.so.6 hash: 657e9707...
+stage-1 gcc hash: 335917db...
+stage-4 gcc hash: 8ce78e79...
+hello from a binary compiled by the CIRCULARLY self-hosted toolchain
+circular self-host confirmed
+CIRCULAR SELF-HOST SUCCEEDED: binutils, glibc, and gcc were all rebuilt from real upstream source using ONLY the fully self-built toolchain (not the bootstrap copies), and the resulting toolchain compiles+links+runs real C and C++ programs correctly
+```
+
 ## Known, deliberate scope limits
 
 - `bzip2` excluded (needs `autoreconfHook` — the "complex bootstrap"
