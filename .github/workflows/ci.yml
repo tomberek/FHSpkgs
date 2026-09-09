@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, for build-heavy's real gcc/binutils/glibc rebuilds (see
+    # that job's own comment) -- exercised regularly, but not on every
+    # push/PR, since each takes 15-20+ minutes even with a warm cache.
+    - cron: "0 6 * * 1"
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flake-checker-action@main
+      - run: nix flake check --no-build
+
+  build:
+    needs: flake-check
+    runs-on: ubuntu-24.04
+    # Every package here builds by `unshare --user --map-root-user
+    # --mount` + `chroot`ing into a synthesized /usr tree -- real
+    # unprivileged Linux user namespaces, not root and not a container.
+    # ubuntu-24.04 runners restrict unprivileged user namespace creation
+    # via AppArmor by default (confirmed: actions/runner-images#10443,
+    # "Error during unshare(...): Operation not permitted", and #11489's
+    # abandoned attempt to disable it image-side) -- so every build in
+    # this matrix would fail at its very first `unshare` call without
+    # this. This is a real, confirmed CI-environment requirement, not a
+    # defensive guess.
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - zlib-fhs
+          - pigz-fhs
+          - xz-fhs
+          - diffutils-fhs
+          - findutils-fhs
+          - gawk-fhs
+          - patch-fhs
+          - attr-fhs
+          - acl-fhs
+          - gnugrep-fhs
+          - file-fhs
+          - gnutar-fhs
+          - gzip-fhs
+          - ed-fhs
+          - bash-fhs
+          - gnused-fhs
+          - coreutils-fhs
+          - patchelf-fhs
+          - binutils-fhs
+          - bzip2-fhs
+          - gcc-fhs
+          - glibc-rebuild-fhs
+          - env-fhs
+          - bootstrap-proof-fhs
+          - full-toolchain-proof-fhs
+          - bootstrap-suite-fhs
+          - bootstrap-env-fhs
+          # gcc-stage2-fhs and circular-bootstrap-proof-fhs are real,
+          # full gcc (and for the latter, also binutils+glibc) rebuilds
+          # -- each takes 15-35+ minutes even with a warm cache. Moved
+          # to build-heavy below, gated on `schedule`/`workflow_dispatch`
+          # only, to keep normal push/PR turnaround reasonable.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Allow unprivileged user namespaces (unshare/chroot)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: nix build .#${{ matrix.package }}
+        run: nix build --print-build-logs ".#${{ matrix.package }}"
+
+  build-heavy:
+    needs: flake-check
+    runs-on: ubuntu-24.04
+    # Only on a schedule or explicit manual trigger -- see build's own
+    # comment for why these two are split out (each is a real, full
+    # gcc/binutils/glibc rebuild taking 15-35+ minutes).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - gcc-stage2-fhs
+          - circular-bootstrap-proof-fhs
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Allow unprivileged user namespaces (unshare/chroot)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: nix build .#${{ matrix.package }}
+        run: nix build --print-build-logs ".#${{ matrix.package }}"
+
+  shells:
+    needs: build
+    runs-on: ubuntu-24.04
+    # Confirms the composed environments are directly runnable, not
+    # just buildable -- same live-shell mechanism documented in
+    # README.md's "Real, runnable environment" section.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Allow unprivileged user namespaces (unshare/chroot)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: fhs-shell smoke test
+        run: nix run .#fhs-shell -- -c 'gcc --version && grep --version'
+      - name: bootstrap-shell smoke test
+        run: nix run .#bootstrap-shell -- -c 'gcc --version && strings /usr/lib/libc.so.6 | grep "^GNU C Library"'

@@ -11,8 +11,18 @@
       # Only x86_64-linux has actually been built and verified; other
       # architectures are untested (the toolchain staging in
       # toolchain.nix hardcodes ld-linux-x86-64.so.2 in a few places).
-      systems = [ "x86_64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems f;
+      #
+      # `systems` is an attrset (not a list) specifically so
+      # `forAllSystems` can be a plain `builtins.mapAttrs` over it --
+      # no `nixpkgs.lib.genAttrs`/`flake-utils.lib.eachSystem` needed.
+      # `mapAttrs` preserves each key (the system string) and replaces
+      # its value with `f system`, which is exactly "for each system,
+      # compute this system's outputs" -- the same shape genAttrs
+      # produces, built from a `builtins`-only primitive instead.
+      systems = {
+        x86_64-linux = { };
+      };
+      forAllSystems = f: builtins.mapAttrs (system: _: f system) systems;
 
       mkPackages =
         system:
