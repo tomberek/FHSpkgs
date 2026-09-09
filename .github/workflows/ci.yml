@@ -109,14 +109,34 @@ jobs:
     # Confirms the composed environments are directly runnable, not
     # just buildable -- same live-shell mechanism documented in
     # README.md's "Real, runnable environment" section.
-    timeout-minutes: 30
+    #
+    # Split into two independent matrix entries rather than one job
+    # running both smoke tests sequentially: confirmed via a real CI
+    # run that GitHub's per-repo Actions cache (used by Magic Nix
+    # Cache) does not reliably retain every one of the 27 concurrent
+    # `build` matrix jobs' outputs by the time this job starts -- one
+    # run needed to rebuild gcc-fhs/glibc-rebuild-fhs/bootstrap-env-fhs
+    # from scratch here despite `build` having already built and cached
+    # them minutes earlier, and ran out its 30-minute budget partway
+    # through bootstrap-shell specifically (a real, observed timeout,
+    # not a hang: the log showed genuine build progress right up to the
+    # cancellation). Splitting means a slow/cold-cache bootstrap-shell
+    # rebuild no longer consumes fhs-shell's own time budget too, and
+    # each gets its own full timeout independently.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fhs-shell
+            check: 'gcc --version && grep --version'
+          - name: bootstrap-shell
+            check: 'gcc --version && strings /usr/lib/libc.so.6 | grep "^GNU C Library"'
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Allow unprivileged user namespaces (unshare/chroot)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: fhs-shell smoke test
-        run: nix run .#fhs-shell -- -c 'gcc --version && grep --version'
-      - name: bootstrap-shell smoke test
-        run: nix run .#bootstrap-shell -- -c 'gcc --version && strings /usr/lib/libc.so.6 | grep "^GNU C Library"'
+      - name: ${{ matrix.name }} smoke test
+        run: nix run ".#${{ matrix.name }}" -- -c '${{ matrix.check }}'
