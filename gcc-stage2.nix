@@ -23,11 +23,15 @@
 # (its zlib smoke test links `/usr/bin/gcc -o /tmp/zt /tmp/zt.c -lz`
 # with zero extra flags, using this exact same overlaid, raw compiler).
 #
-# Same ABI-compatibility scoping as bootstrap-proof.nix/bootstrap-
-# suite.nix: composes gcc-fhs + binutils-fhs only (both built against
-# the BOOTSTRAP glibc, so mutually ABI-compatible), deliberately
-# excluding glibc-rebuild.nix's separately-built glibc for the same
-# already-confirmed version-mismatch reasons documented there.
+# Same ABI-compatibility scoping as bootstrap-proof.nix: composes
+# gcc-fhs + binutils-fhs only (both built against the BOOTSTRAP glibc,
+# so mutually ABI-compatible), deliberately excluding
+# glibc-rebuild.nix's separately-built glibc for the same
+# already-confirmed version-mismatch reasons documented there. (This
+# gap is closed for the FULL toolchain composition in
+# full-toolchain-proof.nix / circular-bootstrap-proof.nix -- this file
+# predates that fix and was never revisited, since its own claim, "gcc
+# can compile itself," doesn't need glibc in the mix to be true.)
 #
 # Two real, non-obvious fixes were needed upstream before this worked:
 # --enable-static in gcc-fhs.nix's own configure (needed so libstdc++-v3's

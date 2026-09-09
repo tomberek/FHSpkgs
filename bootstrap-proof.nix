@@ -19,7 +19,11 @@
 # when mixed). Composing gcc+binutils (both built against the SAME
 # glibc) avoids that hazard entirely while still proving the real
 # thing this capstone is about: a self-built compiler and linker,
-# working together, building real third-party software.
+# working together, building real third-party software. (This gap is
+# closed at the whole-toolchain level in full-toolchain-proof.nix --
+# see that file for how glibc-rebuild.nix itself was fixed to be ABI-
+# compatible -- this file is kept as-is since its own scope, "gcc+
+# binutils work together," doesn't need glibc in the mix either way.)
 #
 # Verification standard: not just "the build exited 0" -- directly
 # content-hash-compare the gcc/ld binaries actually exercised during

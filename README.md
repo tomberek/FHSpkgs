@@ -11,6 +11,20 @@ all 17 tools nixpkgs' `stdenv-linux` calls its "final stdenv" (coreutils,
 bash, gnused, gnutar, gzip, xz, diffutils, findutils, gawk, patch,
 gnugrep, file, ed, attr, acl, patchelf).
 
+### Self-hosting escalation, at a glance
+
+Six proof files build on each other, each closing a gap the last one
+deliberately left open. Read top-to-bottom for the full story; each
+file's own section below has the real command output and root causes.
+
+| File | Composes | Proves |
+| --- | --- | --- |
+| `bootstrap-proof.nix` | self-built gcc + binutils (glibc still bootstrap) | the two pieces work *together*, not just standalone |
+| `gcc-stage2.nix` | self-built gcc+binutils | gcc can compile *itself* (still runs against bootstrap glibc) |
+| `full-toolchain-proof.nix` | self-built gcc + binutils + **glibc** | all three are mutually ABI-compatible — the gap `bootstrap-proof.nix` left open |
+| `bootstrap-suite.nix` / `bootstrap-env.nix` | fully self-built toolchain | *every* package this project builds, not just zlib |
+| `circular-bootstrap-proof.nix` | fully self-built toolchain | binutils, glibc, *and* gcc all rebuild from source using **only** the self-built toolchain — no bootstrap copies involved |
+
 ## How nixpkgs is used — two separate roles, don't conflate them
 
 **1. Bootstrap toolchain (`toolchain.nix`)** — a handful of *prebuilt
