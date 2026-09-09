@@ -1,27 +1,16 @@
 { pkgs ? import <nixpkgs> {} }:
 
-let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-in
-pkgs.stdenv.mkDerivation {
-  name = "ed-fhs";
-  nativeBuildInputs = [ pkgs.util-linux pkgs.coreutils pkgs.patchelf pkgs.gnutar pkgs.gzip pkgs.gnumake pkgs.lzip ];
-  dontUnpack = true;
-  dontFixup = true;
-
-  # Only pkgs.ed.src is used below. Source is a .tar.lz (lzip-compressed);
-  # lzip is staged in the bootstrap toolchain to decompress it, and is
-  # also listed here in nativeBuildInputs because buildAutotools's own
-  # unpack step runs in the OUTER build sandbox before anything is
-  # chrooted.
-  buildPhase = ''
-    set -e
-    fhsroot=$TMPDIR/fhsroot
-
-    ${toolchain}
-
-    buildAutotools ed ${pkgs.ed.src}
-
+# Only pkgs.ed.src is used below. Source is a .tar.lz (lzip-compressed);
+# lzip is staged in the bootstrap toolchain to decompress it, and is
+# also listed here in extraNativeBuildInputs because buildAutotools's
+# own unpack step runs in the OUTER build sandbox before anything is
+# chrooted.
+import ./mkFhsPackage.nix {
+  inherit pkgs;
+  name = "ed";
+  extraNativeBuildInputs = [ pkgs.lzip ];
+  build = "buildAutotools ed ${pkgs.ed.src}";
+  smokeTest = ''
     echo "=== smoke test: scripted line-editor edit ==="
     printf 'line one\nline two\nline three\n' > "$fhsroot/tmp/ed-in.txt"
     printf '2c\nEDITED LINE\n.\nw\nq\n' > "$fhsroot/tmp/ed-script.txt"
@@ -29,10 +18,5 @@ pkgs.stdenv.mkDerivation {
     run /tmp bash -c "grep -q 'EDITED LINE' /tmp/ed-in.txt"
 
     echo "ED FHS BUILD SUCCEEDED"
-  '';
-
-  installPhase = ''
-    mkdir -p $out
-    installOnlyNew "$out"
   '';
 }

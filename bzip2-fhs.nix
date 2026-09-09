@@ -21,23 +21,10 @@
 # see toolchain.nix's own header comment on this). A future CVE fix for
 # THIS harness's own bzip2 build would be a separate, explicit decision,
 # not silently inherited from nixpkgs' patch stack.
-
-let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-  bzip2Src = pkgs.bzip2.src;
-in
-pkgs.stdenv.mkDerivation {
-  name = "bzip2-fhs";
-  nativeBuildInputs = [ pkgs.util-linux pkgs.coreutils pkgs.patchelf pkgs.gnutar pkgs.gzip pkgs.gnumake ];
-  dontUnpack = true;
-  dontFixup = true;
-
-  buildPhase = ''
-    set -e
-    fhsroot=$TMPDIR/fhsroot
-
-    ${toolchain}
-
+import ./mkFhsPackage.nix {
+  inherit pkgs;
+  name = "bzip2";
+  build = ''
     # bzip2's own Makefile hardcodes CC=gcc by default -- buildMake's own
     # `make CC=/usr/bin/gcc ...` invocation overrides that the same way
     # it does for every other buildMake caller (pigz-fhs.nix), so no
@@ -53,8 +40,9 @@ pkgs.stdenv.mkDerivation {
     # build phase focused on what buildMake's own model expects (build,
     # then a separate installCmd), matching every other buildMake caller
     # in this project (pigz-fhs.nix).
-    buildMake bzip2 ${bzip2Src} 'make install PREFIX=/usr' bzip2 bzip2recover PREFIX=/usr
-
+    buildMake bzip2 ${pkgs.bzip2.src} 'make install PREFIX=/usr' bzip2 bzip2recover PREFIX=/usr
+  '';
+  smokeTest = ''
     echo "--- RPATH/NEEDED on the produced bzip2 binary ---"
     readelf -d "$fhsroot/usr/bin/bzip2" | grep -E 'RUNPATH|RPATH|NEEDED'
 
@@ -72,10 +60,5 @@ pkgs.stdenv.mkDerivation {
     fi
 
     echo "BZIP2 FHS BUILD SUCCEEDED: real upstream Makefile built directly (no autoreconf needed), real compress+decompress round-trip verified byte-identical"
-  '';
-
-  installPhase = ''
-    mkdir -p $out
-    installOnlyNew "$out"
   '';
 }

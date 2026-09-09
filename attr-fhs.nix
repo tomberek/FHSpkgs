@@ -1,25 +1,13 @@
 { pkgs ? import <nixpkgs> {} }:
 
-let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-in
-pkgs.stdenv.mkDerivation {
-  name = "attr-fhs";
-  nativeBuildInputs = [ pkgs.util-linux pkgs.coreutils pkgs.patchelf pkgs.gnutar pkgs.gzip pkgs.gnumake ];
-  dontUnpack = true;
-  dontFixup = true;
-
-  # Only pkgs.attr.src is used below. Trivial autotools build; nixpkgs'
-  # multi-output split (bin/dev/out/man/doc) is cosmetic and skipped
-  # here -- everything installs under one /usr prefix.
-  buildPhase = ''
-    set -e
-    fhsroot=$TMPDIR/fhsroot
-
-    ${toolchain}
-
-    buildAutotools attr ${pkgs.attr.src}
-
+# Only pkgs.attr.src is used below. Trivial autotools build; nixpkgs'
+# multi-output split (bin/dev/out/man/doc) is cosmetic and skipped
+# here -- everything installs under one /usr prefix.
+import ./mkFhsPackage.nix {
+  inherit pkgs;
+  name = "attr";
+  build = "buildAutotools attr ${pkgs.attr.src}";
+  smokeTest = ''
     echo "=== smoke test: setfattr + getfattr round-trip ==="
     run /tmp /usr/bin/touch /tmp/xattr-test.txt
     set +e
@@ -33,10 +21,5 @@ pkgs.stdenv.mkDerivation {
       echo "SKIPPED functional check (environment limitation -- this build sandbox's filesystem doesn't support user xattrs, not a build failure): $(cat /tmp/attr-check.log)"
       echo "ATTR FHS BUILD SUCCEEDED (build verified; xattr round-trip skipped)"
     fi
-  '';
-
-  installPhase = ''
-    mkdir -p $out
-    installOnlyNew "$out"
   '';
 }
