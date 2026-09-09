@@ -6,10 +6,10 @@ A build harness that takes real upstream package sources and builds them
 with `./configure && make && make install` (or a plain `make` for
 Makefile-only packages), running genuinely inside a synthesized
 `/usr`-shaped chroot (`/usr/lib`, `/usr/include`, `/usr/bin`) — not
-`/nix/store/<hash>-name`. Confirmed working end-to-end for zlib, pigz, and
-all 17 tools nixpkgs' `stdenv-linux` calls its "final stdenv" (coreutils,
-bash, gnused, gnutar, gzip, xz, diffutils, findutils, gawk, patch,
-gnugrep, file, ed, attr, acl, patchelf).
+`/nix/store/<hash>-name`. Confirmed working end-to-end for zlib, pigz,
+bzip2, and all 17 tools nixpkgs' `stdenv-linux` calls its "final
+stdenv" (coreutils, bash, gnused, gnutar, gzip, xz, diffutils,
+findutils, gawk, patch, gnugrep, file, ed, attr, acl, patchelf).
 
 ### Self-hosting escalation, at a glance
 
@@ -564,8 +564,6 @@ CIRCULAR SELF-HOST SUCCEEDED: binutils, glibc, and gcc were all rebuilt from rea
 
 ## Known, deliberate scope limits
 
-- `bzip2` excluded (needs `autoreconfHook` — the "complex bootstrap"
-  category deliberately deferred from the start).
 - No dependency resolver, no generic recipe language — each package's
   build steps are hand-written, matching nixpkgs' *known* real recipe
   for that package (read from its `.nix` file), not guessed.
@@ -575,6 +573,19 @@ CIRCULAR SELF-HOST SUCCEEDED: binutils, glibc, and gcc were all rebuilt from rea
   faked: `setfattr`/`setfacl` report `Operation not supported` because
   the underlying build sandbox's `$TMPDIR` filesystem doesn't support
   user xattrs/ACLs — a host limitation, not a build failure.
+
+`bzip2` was originally excluded here with the reasoning "needs
+`autoreconfHook`, the complex-bootstrap category deferred from the
+start." Revisited by actually reading nixpkgs' own recipe rather than
+trusting that assumption: `autoreconfHook` there exists only to apply a
+CVE patch and nixpkgs' own autotools-ification — real upstream bzip2
+ships a plain, hand-written `Makefile` (no `configure.ac`, confirmed by
+inspecting the real tarball) and never needed autoreconf to build at
+all. `bzip2-fhs.nix` builds it directly via the same `buildMake`
+mechanism `pigz-fhs.nix` already uses, no autoreconf involved — now part
+of `env-fhs`'s union (19 packages) with a real compress/decompress
+round-trip smoke test, both standalone and as the combined environment's
+13th cross-package smoke-test step.
 
 Full build-by-build history, every bug found and its root cause, and the
 original planning context live in the session's plan files

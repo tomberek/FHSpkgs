@@ -29,6 +29,7 @@ let
     (import ./coreutils-fhs.nix { inherit pkgs; })
     (import ./patchelf-fhs.nix { inherit pkgs; })
     (import ./binutils-fhs.nix { inherit pkgs; })
+    (import ./bzip2-fhs.nix { inherit pkgs; })
   ];
 in
 pkgs.stdenv.mkDerivation {
@@ -38,7 +39,7 @@ pkgs.stdenv.mkDerivation {
   dontFixup = true;
 
   # NOTE on provenance, same two-tier rule as every other file here:
-  # each of the 18 `packages` above was built from its own real
+  # each of the 19 `packages` above was built from its own real
   # upstream `.src` only (see each file's own header comment); nothing
   # in THIS file adds a new source dependency on nixpkgs beyond what
   # toolchain.nix already uses for the bootstrap runtime layer below.
@@ -123,6 +124,7 @@ pkgs.stdenv.mkDerivation {
     unionPackage coreutils ${builtins.elemAt packages 16}
     unionPackage patchelf ${builtins.elemAt packages 17}
     unionPackage binutils ${builtins.elemAt packages 18}
+    unionPackage bzip2 ${builtins.elemAt packages 19}
 
     if [ "$fail" -ne 0 ]; then
       echo "UNION FAILED: real conflicts found (see CONFLICT lines above)"
@@ -223,7 +225,14 @@ BTEOF
     run /tmp /usr/bin/strip /tmp/bt
     run /tmp /tmp/bt
 
-    echo "COMBINED ENVIRONMENT SMOKE TEST SUCCEEDED: 12 real cross-package operations, all against the SAME unioned /usr tree, zero conflicts, zero /nix/store visible"
+    # 13. real compress+decompress through the from-source bzip2,
+    # against the SAME unioned tree's libc -- confirms bzip2's real
+    # upstream Makefile (no autoreconf) produces a genuinely working
+    # binary alongside every other package here.
+    run /tmp bash -c 'cp /tmp/src.txt /tmp/bz-test.txt && /usr/bin/bzip2 -f /tmp/bz-test.txt && /usr/bin/bzip2 -d -f /tmp/bz-test.txt.bz2'
+    run /tmp bash -c "grep -q 'LINE TWO PATCHED' /tmp/bz-test.txt"
+
+    echo "COMBINED ENVIRONMENT SMOKE TEST SUCCEEDED: 13 real cross-package operations, all against the SAME unioned /usr tree, zero conflicts, zero /nix/store visible"
   '';
 
   installPhase = ''
