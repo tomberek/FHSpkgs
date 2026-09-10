@@ -9,28 +9,42 @@ let
   # -- no bootstrap toolchain leakage, confirmed per-package in the
   # prior session. None of these "provide" libc/ld.so/libstdc++ --
   # those are bootstrap-only (see below).
-  packages = [
-    (import ./zlib-fhs.nix { inherit pkgs; })
-    (import ./pigz-fhs.nix { inherit pkgs; })
-    (import ./xz-fhs.nix { inherit pkgs; })
-    (import ./diffutils-fhs.nix { inherit pkgs; })
-    (import ./findutils-fhs.nix { inherit pkgs; })
-    (import ./gawk-fhs.nix { inherit pkgs; })
-    (import ./patch-fhs.nix { inherit pkgs; })
-    (import ./attr-fhs.nix { inherit pkgs; })
-    (import ./acl-fhs.nix { inherit pkgs; })
-    (import ./gnugrep-fhs.nix { inherit pkgs; })
-    (import ./file-fhs.nix { inherit pkgs; })
-    (import ./gnutar-fhs.nix { inherit pkgs; })
-    (import ./gzip-fhs.nix { inherit pkgs; })
-    (import ./ed-fhs.nix { inherit pkgs; })
-    (import ./bash-fhs.nix { inherit pkgs; })
-    (import ./gnused-fhs.nix { inherit pkgs; })
-    (import ./coreutils-fhs.nix { inherit pkgs; })
-    (import ./patchelf-fhs.nix { inherit pkgs; })
-    (import ./binutils-fhs.nix { inherit pkgs; })
-    (import ./bzip2-fhs.nix { inherit pkgs; })
-  ];
+  #
+  # A named attrset, not a list -- a list paired with `builtins.elemAt
+  # packages N` calls below was a real correctness hazard, not just a
+  # style choice: inserting a new package anywhere but the end silently
+  # shifted every later index, unioning the wrong store path under the
+  # wrong name with no error. Names are the only stable handle.
+  packages = {
+    zlib = import ./zlib-fhs.nix { inherit pkgs; };
+    pigz = import ./pigz-fhs.nix { inherit pkgs; };
+    xz = import ./xz-fhs.nix { inherit pkgs; };
+    diffutils = import ./diffutils-fhs.nix { inherit pkgs; };
+    findutils = import ./findutils-fhs.nix { inherit pkgs; };
+    gawk = import ./gawk-fhs.nix { inherit pkgs; };
+    patch = import ./patch-fhs.nix { inherit pkgs; };
+    attr = import ./attr-fhs.nix { inherit pkgs; };
+    acl = import ./acl-fhs.nix { inherit pkgs; };
+    gnugrep = import ./gnugrep-fhs.nix { inherit pkgs; };
+    file = import ./file-fhs.nix { inherit pkgs; };
+    gnutar = import ./gnutar-fhs.nix { inherit pkgs; };
+    gzip = import ./gzip-fhs.nix { inherit pkgs; };
+    ed = import ./ed-fhs.nix { inherit pkgs; };
+    bash = import ./bash-fhs.nix { inherit pkgs; };
+    gnused = import ./gnused-fhs.nix { inherit pkgs; };
+    coreutils = import ./coreutils-fhs.nix { inherit pkgs; };
+    patchelf = import ./patchelf-fhs.nix { inherit pkgs; };
+    binutils = import ./binutils-fhs.nix { inherit pkgs; };
+    bzip2 = import ./bzip2-fhs.nix { inherit pkgs; };
+  };
+
+  # `unionPackage <name> <out>` once per entry, in the same order the
+  # attrset lists them -- generated, not hand-written, so a new package
+  # only needs to be added to `packages` above; there is no second list
+  # to keep in sync.
+  unionCalls = pkgs.lib.concatStringsSep "\n" (
+    pkgs.lib.mapAttrsToList (name: out: "unionPackage ${name} ${out}") packages
+  );
 in
 pkgs.stdenv.mkDerivation {
   name = "env-fhs";
@@ -105,26 +119,7 @@ pkgs.stdenv.mkDerivation {
       done < <(find "$__up_out/usr" -type f -o -type l)
     }
 
-    unionPackage zlib ${builtins.elemAt packages 0}
-    unionPackage pigz ${builtins.elemAt packages 1}
-    unionPackage xz ${builtins.elemAt packages 2}
-    unionPackage diffutils ${builtins.elemAt packages 3}
-    unionPackage findutils ${builtins.elemAt packages 4}
-    unionPackage gawk ${builtins.elemAt packages 5}
-    unionPackage patch ${builtins.elemAt packages 6}
-    unionPackage attr ${builtins.elemAt packages 7}
-    unionPackage acl ${builtins.elemAt packages 8}
-    unionPackage gnugrep ${builtins.elemAt packages 9}
-    unionPackage file ${builtins.elemAt packages 10}
-    unionPackage gnutar ${builtins.elemAt packages 11}
-    unionPackage gzip ${builtins.elemAt packages 12}
-    unionPackage ed ${builtins.elemAt packages 13}
-    unionPackage bash ${builtins.elemAt packages 14}
-    unionPackage gnused ${builtins.elemAt packages 15}
-    unionPackage coreutils ${builtins.elemAt packages 16}
-    unionPackage patchelf ${builtins.elemAt packages 17}
-    unionPackage binutils ${builtins.elemAt packages 18}
-    unionPackage bzip2 ${builtins.elemAt packages 19}
+    ${unionCalls}
 
     if [ "$fail" -ne 0 ]; then
       echo "UNION FAILED: real conflicts found (see CONFLICT lines above)"
