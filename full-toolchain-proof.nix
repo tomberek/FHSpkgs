@@ -26,7 +26,10 @@
 # gcc/binutils to run in the first place, and glibc-rebuild.nix likewise
 # needs the bootstrap gcc's own cc1/mpfr to build itself. Composing them
 # afterward, in one shared chroot, is a separate step from building each
-# piece -- exactly like bootstrap-proof.nix's own two-stage overlay.
+# piece -- exactly like bootstrap-proof.nix's own two-stage overlay. See
+# toolchain.nix's own composeFullToolchain() for the overlay+hash-verify
+# sequence itself (shared with bootstrap-suite-build.nix, which composes
+# the identical three pieces the same way).
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };
@@ -46,35 +49,7 @@ pkgs.stdenv.mkDerivation {
 
     ${toolchain}
 
-    echo "=== overlaying self-built gcc + binutils on top of the bootstrap toolchain ==="
-    overlayPackage ${gccFhs}
-    overlayPackage ${binutilsFhs}
-
-    echo "=== VERIFY: active gcc/ld are byte-identical to gcc-fhs's / binutils-fhs's own outputs ==="
-    gcc_active=$(sha256sum "$fhsroot/usr/bin/gcc" | cut -d' ' -f1)
-    gcc_expected=$(sha256sum "${gccFhs}/usr/bin/gcc" | cut -d' ' -f1)
-    [ "$gcc_active" = "$gcc_expected" ] || { echo "FAILED: gcc mismatch"; exit 1; }
-    ld_active=$(sha256sum "$fhsroot/usr/bin/ld.bfd" | cut -d' ' -f1)
-    ld_expected=$(sha256sum "${binutilsFhs}/usr/bin/ld.bfd" | cut -d' ' -f1)
-    [ "$ld_active" = "$ld_expected" ] || { echo "FAILED: ld.bfd mismatch"; exit 1; }
-    echo "CONFIRMED: gcc ($gcc_active) and ld.bfd ($ld_active) are genuinely the self-built outputs"
-
-    echo "=== sanity: composed gcc/ld work BEFORE the glibc overlay ==="
-    run /tmp /usr/bin/gcc --version | head -1
-    run /tmp /usr/bin/ld.bfd --version | head -1
-
-    echo "=== overlaying self-built glibc (glibc-rebuild.nix output, ABI-fixed) on top ==="
-    overlayPackage ${glibcRebuild}
-
-    echo "=== VERIFY: active libc.so.6 is byte-identical to glibc-rebuild's own output ==="
-    libc_active=$(sha256sum "$fhsroot/usr/lib/libc.so.6" | cut -d' ' -f1)
-    libc_expected=$(sha256sum "${glibcRebuild}/usr/lib/libc.so.6" | cut -d' ' -f1)
-    [ "$libc_active" = "$libc_expected" ] || { echo "FAILED: libc.so.6 mismatch"; exit 1; }
-    echo "CONFIRMED: libc.so.6 ($libc_active) is genuinely the self-built glibc output"
-
-    echo "=== does composed gcc (built against the BOOTSTRAP glibc) still run correctly against the SELF-BUILT glibc now in place? ==="
-    run /tmp /usr/bin/gcc --version | head -1
-    run /tmp /usr/bin/ld.bfd --version | head -1
+    composeFullToolchain ${gccFhs} ${binutilsFhs} ${glibcRebuild}
 
     echo "=== does the bootstrap-provided bash/coreutils still work alongside the self-built glibc? ==="
     run /tmp bash --version | head -1

@@ -539,6 +539,49 @@ WRAP
     run /tmp python3 --version
   }
 
+  # composeFullToolchain(gccOut, binutilsOut, glibcOut) -- overlays the
+  # three self-built toolchain pieces on top of the bootstrap toolchain,
+  # gcc+binutils first then glibc (composition order is deliberate: see
+  # full-toolchain-proof.nix's own header for why), hash-verifying each
+  # is genuinely active against its own standalone output before moving
+  # on. Extracted after this exact sequence turned up byte-identical
+  # (modulo echo text) in bootstrap-proof.nix (gcc+binutils only),
+  # full-toolchain-proof.nix, and bootstrap-suite-build.nix. Takes the
+  # three store paths as plain bash arguments (not Nix-level bindings
+  # the way stageGlibcBuildDeps's bison/gettext/etc. are) since which
+  # gcc-fhs/binutils-fhs/glibc-rebuild build is being composed varies
+  # per caller -- toolchain.nix itself has no opinion on that.
+  composeFullToolchain() {
+    __cft_gcc="$1"; __cft_binutils="$2"; __cft_glibc="$3"
+
+    echo "=== overlaying self-built gcc + binutils on top of the bootstrap toolchain ==="
+    overlayPackage "$__cft_gcc"
+    overlayPackage "$__cft_binutils"
+
+    echo "=== VERIFY: active gcc/ld are byte-identical to gcc-fhs's / binutils-fhs's own outputs ==="
+    __cft_gcc_active=$(sha256sum "$fhsroot/usr/bin/gcc" | cut -d' ' -f1)
+    __cft_gcc_expected=$(sha256sum "$__cft_gcc/usr/bin/gcc" | cut -d' ' -f1)
+    [ "$__cft_gcc_active" = "$__cft_gcc_expected" ] || { echo "FAILED: gcc mismatch"; exit 1; }
+    __cft_ld_active=$(sha256sum "$fhsroot/usr/bin/ld.bfd" | cut -d' ' -f1)
+    __cft_ld_expected=$(sha256sum "$__cft_binutils/usr/bin/ld.bfd" | cut -d' ' -f1)
+    [ "$__cft_ld_active" = "$__cft_ld_expected" ] || { echo "FAILED: ld.bfd mismatch"; exit 1; }
+    echo "CONFIRMED: gcc ($__cft_gcc_active) and ld.bfd ($__cft_ld_active) are genuinely the self-built outputs"
+
+    echo "=== overlaying self-built glibc (ABI-fixed) on top ==="
+    overlayPackage "$__cft_glibc"
+
+    echo "=== VERIFY: active libc.so.6 is byte-identical to glibc-rebuild's own output ==="
+    __cft_libc_active=$(sha256sum "$fhsroot/usr/lib/libc.so.6" | cut -d' ' -f1)
+    __cft_libc_expected=$(sha256sum "$__cft_glibc/usr/lib/libc.so.6" | cut -d' ' -f1)
+    [ "$__cft_libc_active" = "$__cft_libc_expected" ] || { echo "FAILED: libc.so.6 mismatch"; exit 1; }
+    echo "CONFIRMED: libc.so.6 ($__cft_libc_active) is genuinely the self-built glibc output"
+
+    echo "=== sanity: composed gcc/ld/bash still work with the self-built glibc now in place ==="
+    run /tmp /usr/bin/gcc --version | head -1
+    run /tmp /usr/bin/ld.bfd --version | head -1
+    run /tmp bash --version | head -1
+  }
+
 
   # ==========================================================================
   # Everything below this point builds real packages from real SOURCE

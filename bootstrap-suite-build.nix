@@ -8,14 +8,15 @@
 # bootstrap-shell). Factored out here instead of duplicated so a future
 # fix only needs to happen once.
 #
-# Composes all three self-built toolchain pieces, same order and same
-# ABI-compatibility reasoning as full-toolchain-proof.nix: gcc+binutils
-# first, then glibc-rebuild.nix (with its own ABI-compatibility fix --
-# see that file's glibcMasterPatch comment) on top. Earlier versions of
-# this file deliberately excluded glibc for the ABI-mismatch reasons
-# documented in bootstrap-proof.nix's header; full-toolchain-proof.nix
-# resolved that by fixing glibc-rebuild.nix itself, so every consumer of
-# THIS shared script now gets the fully self-built toolchain too.
+# Composes all three self-built toolchain pieces via toolchain.nix's own
+# composeFullToolchain() -- same order and same ABI-compatibility
+# reasoning as full-toolchain-proof.nix (that shared function is what
+# both this file and full-toolchain-proof.nix actually call). Earlier
+# versions of this file deliberately excluded glibc for the ABI-mismatch
+# reasons documented in bootstrap-proof.nix's header; full-toolchain-
+# proof.nix resolved that by fixing glibc-rebuild.nix itself, so every
+# consumer of THIS shared script now gets the fully self-built toolchain
+# too.
 #
 # Returns a bash snippet, spliced into a derivation's buildPhase. Same
 # calling convention as toolchain.nix: assumes $fhsroot is already set
@@ -27,31 +28,7 @@ let
   glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
 in
 ''
-  echo "=== overlaying self-built gcc + binutils on top of the bootstrap toolchain ==="
-  overlayPackage ${gccFhs}
-  overlayPackage ${binutilsFhs}
-
-  echo "=== VERIFY: active gcc/ld are byte-identical to gcc-fhs's / binutils-fhs's own outputs ==="
-  gcc_active=$(sha256sum "$fhsroot/usr/bin/gcc" | cut -d' ' -f1)
-  gcc_expected=$(sha256sum "${gccFhs}/usr/bin/gcc" | cut -d' ' -f1)
-  [ "$gcc_active" = "$gcc_expected" ] || { echo "FAILED: gcc mismatch"; exit 1; }
-  ld_active=$(sha256sum "$fhsroot/usr/bin/ld.bfd" | cut -d' ' -f1)
-  ld_expected=$(sha256sum "${binutilsFhs}/usr/bin/ld.bfd" | cut -d' ' -f1)
-  [ "$ld_active" = "$ld_expected" ] || { echo "FAILED: ld.bfd mismatch"; exit 1; }
-  echo "CONFIRMED: composed gcc ($gcc_active) and ld.bfd ($ld_active) are genuinely active"
-
-  echo "=== overlaying self-built glibc (glibc-rebuild.nix output, ABI-fixed) on top ==="
-  overlayPackage ${glibcRebuild}
-
-  echo "=== VERIFY: active libc.so.6 is byte-identical to glibc-rebuild's own output ==="
-  libc_active=$(sha256sum "$fhsroot/usr/lib/libc.so.6" | cut -d' ' -f1)
-  libc_expected=$(sha256sum "${glibcRebuild}/usr/lib/libc.so.6" | cut -d' ' -f1)
-  [ "$libc_active" = "$libc_expected" ] || { echo "FAILED: libc.so.6 mismatch"; exit 1; }
-  echo "CONFIRMED: libc.so.6 ($libc_active) is genuinely the self-built glibc output"
-
-  echo "=== sanity: composed gcc/ld/bash still work with the self-built glibc now in place ==="
-  run /tmp /usr/bin/gcc --version | head -1
-  run /tmp bash --version | head -1
+  composeFullToolchain ${gccFhs} ${binutilsFhs} ${glibcRebuild}
 
   snapshotToolchain
 
