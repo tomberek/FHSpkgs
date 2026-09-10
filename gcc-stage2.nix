@@ -52,6 +52,7 @@
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ./gcc-configure-flags.nix;
   gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
   binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
   gccSrc = pkgs.gcc-unwrapped.src;
@@ -114,27 +115,7 @@ pkgs.stdenv.mkDerivation {
     run /tmp/gcc2-build bash -c '
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec bash /tmp/gcc2-src/configure \
-        --prefix=/usr \
-        --with-native-system-header-dir=/usr/include \
-        --with-build-sysroot=/ \
-        --disable-multilib \
-        --disable-bootstrap \
-        --disable-libsanitizer \
-        --disable-libgomp \
-        --disable-libatomic \
-        --disable-libssp \
-        --disable-libquadmath \
-        --disable-libitm \
-        --disable-libvtv \
-        --enable-languages=c,c++ \
-        --enable-shared \
-        --enable-static \
-        --enable-threads=posix \
-        --enable-__cxa_atexit \
-        --enable-long-long \
-        --disable-libcc1 \
-        --disable-plugin \
-        --disable-nls
+        ${gccConfigureFlags}
     ' > /tmp/gcc2-configure.log 2>&1
     status=$?
     set -e

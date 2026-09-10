@@ -36,6 +36,7 @@
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ./gcc-configure-flags.nix;
   gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
   binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
   glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
@@ -47,11 +48,6 @@ let
   mpfrSrc = pkgs.mpfr.src;
   mpcSrc = pkgs.libmpc.src;
 
-  bison = pkgs.bison;
-  gettext = pkgs.gettext;
-  python3Minimal = pkgs.python3Minimal;
-  pythonVersion = python3Minimal.pythonVersion;
-  gnum4 = pkgs.gnum4;
   glibcMasterPatch = "${pkgs.path}/pkgs/development/libraries/glibc/2.42-master.patch";
 in
 pkgs.stdenv.mkDerivation {
@@ -124,54 +120,7 @@ EOF
     echo "# gcc-norpath wrapper needed -- see header comment)."
     echo "############################################################"
 
-    stageTool() {
-      __st_pkg="$1"
-      __st_work=$TMPDIR/work-stage-$(basename "$__st_pkg")
-      mkdir -p "$__st_work"
-      [ -d "$__st_pkg/bin" ] && cp -a --no-preserve=ownership "$__st_pkg"/bin/. "$__st_work/"
-      chmod -R u+w "$__st_work"
-      find "$__st_work" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print > /tmp/stage-elfs.txt 2>/dev/null || true
-      while read -r f; do
-        patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-        patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-      done < /tmp/stage-elfs.txt
-      cp -a "$__st_work/." "$fhsroot/usr/bin/"
-      [ -d "$__st_pkg/bin" ] && find "$__st_pkg/bin" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print > /tmp/stage-orig-elfs.txt 2>/dev/null || : > /tmp/stage-orig-elfs.txt
-      : > /tmp/stage-deps.txt
-      while read -r origf; do
-        ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/stage-deps.txt || true
-      done < /tmp/stage-orig-elfs.txt
-      sort -u /tmp/stage-deps.txt > /tmp/stage-deps-uniq.txt
-      while read -r lib; do
-        dest="$fhsroot/usr/lib/$(basename "$lib")"
-        [ -e "$dest" ] && continue
-        cp -aL --no-preserve=ownership "$lib" "$dest" 2>/dev/null || true
-      done < /tmp/stage-deps-uniq.txt
-    }
-    stageTool ${bison}
-    stageTool ${gettext}
-    stageTool ${python3Minimal}
-    stageTool ${gnum4}
-    stageTool ${pkgs.gzip}
-    ln -sf bison "$fhsroot/usr/bin/yacc" 2>/dev/null || true
-    sed -i "s|${pkgs.gzip}/bin/|/usr/bin/|g" "$fhsroot/usr/bin/gzip" "$fhsroot/usr/bin/gunzip" "$fhsroot/usr/bin/zcat" 2>/dev/null || true
-    mkdir -p "$fhsroot/usr/share"
-    cp -a --no-preserve=ownership ${bison}/share/bison "$fhsroot/usr/share/bison"
-    chmod -R u+w "$fhsroot/usr/share/bison"
-    export BISON_PKGDATADIR=/usr/share/bison
-    cp -a --no-preserve=ownership ${python3Minimal}/lib/python${pythonVersion} "$fhsroot/usr/lib/python${pythonVersion}"
-    chmod -R u+w "$fhsroot/usr/lib/python${pythonVersion}"
-    __py_bash_sh=$(grep -oE '/nix/store/[a-z0-9]+-bash-[0-9.p]+/bin/sh' ${python3Minimal}/lib/python${pythonVersion}/subprocess.py | head -1)
-    if [ -n "$__py_bash_sh" ]; then
-      mkdir -p "$fhsroot$(dirname "$__py_bash_sh")"
-      ln -sf /usr/bin/bash "$fhsroot$__py_bash_sh"
-      ln -sf /usr/bin/bash "$fhsroot$(dirname "$__py_bash_sh")/bash"
-    fi
-    __bison_m4=$(strings ${bison}/bin/bison | grep -oE '/nix/store/[a-z0-9]+-gnum4-[0-9.]+/bin/m4' | head -1)
-    if [ -n "$__bison_m4" ]; then
-      mkdir -p "$fhsroot$(dirname "$__bison_m4")"
-      ln -sf /usr/bin/m4 "$fhsroot$__bison_m4"
-    fi
+    stageGlibcBuildDeps
 
     srcdir=$fhsroot/tmp/glibc2-src
     builddir=$fhsroot/tmp/glibc2-build
@@ -268,27 +217,7 @@ EOF
     run /tmp/gcc2-build bash -c '
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec bash /tmp/gcc2-src/configure \
-        --prefix=/usr \
-        --with-native-system-header-dir=/usr/include \
-        --with-build-sysroot=/ \
-        --disable-multilib \
-        --disable-bootstrap \
-        --disable-libsanitizer \
-        --disable-libgomp \
-        --disable-libatomic \
-        --disable-libssp \
-        --disable-libquadmath \
-        --disable-libitm \
-        --disable-libvtv \
-        --enable-languages=c,c++ \
-        --enable-shared \
-        --enable-static \
-        --enable-threads=posix \
-        --enable-__cxa_atexit \
-        --enable-long-long \
-        --disable-libcc1 \
-        --disable-plugin \
-        --disable-nls
+        ${gccConfigureFlags}
     ' > /tmp/gcc2-configure.log 2>&1
     status=$?
     set -e

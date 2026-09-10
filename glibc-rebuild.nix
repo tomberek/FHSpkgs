@@ -24,11 +24,6 @@
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };
-  bison = pkgs.bison;
-  gettext = pkgs.gettext;
-  python3Minimal = pkgs.python3Minimal;
-  pythonVersion = python3Minimal.pythonVersion;
-  gnum4 = pkgs.gnum4;
   # Real upstream glibc git commits between the 2.42.0 release tarball and
   # nixpkgs' current glibc pin (nixpkgs' own comment on this same file:
   # `git show --minimal --reverse glibc-2.42.. > 2.42-master.patch` --
@@ -60,110 +55,11 @@ pkgs.stdenv.mkDerivation {
 
     ${toolchain}
 
-    # ------------------------------------------------------------------
-    # Stage glibc's OWN build-time deps not already in the toolchain:
-    # bison, gettext (msgfmt et al), python3Minimal, m4, gzip. Same
-    # pattern toolchain.nix uses for every other bootstrap tool: copy
-    # bin/, patchelf every ELF found, resolve deps via ldd on the
-    # ORIGINAL (unpatched) binary, copy anything missing into /usr/lib.
-    # ------------------------------------------------------------------
-    stageTool() {
-      __st_pkg="$1"
-      __st_work=$TMPDIR/work-stage-$(basename "$__st_pkg")
-      mkdir -p "$__st_work"
-      [ -d "$__st_pkg/bin" ] && cp -a --no-preserve=ownership "$__st_pkg"/bin/. "$__st_work/"
-      chmod -R u+w "$__st_work"
-      find "$__st_work" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print > /tmp/stage-elfs.txt 2>/dev/null || true
-      while read -r f; do
-        patchelf --set-rpath /usr/lib "$f" 2>/dev/null || true
-        patchelf --set-interpreter /usr/lib/ld-linux-x86-64.so.2 "$f" 2>/dev/null || true
-      done < /tmp/stage-elfs.txt
-      cp -a "$__st_work/." "$fhsroot/usr/bin/"
-      [ -d "$__st_pkg/bin" ] && find "$__st_pkg/bin" -type f -exec sh -c 'head -c4 "$1" 2>/dev/null | grep -q ELF' _ {} \; -print > /tmp/stage-orig-elfs.txt 2>/dev/null || : > /tmp/stage-orig-elfs.txt
-      : > /tmp/stage-deps.txt
-      while read -r origf; do
-        ldd "$origf" 2>/dev/null | grep -oE '/nix/store/[^ ]+\.so[^ ]*' >> /tmp/stage-deps.txt || true
-      done < /tmp/stage-orig-elfs.txt
-      sort -u /tmp/stage-deps.txt > /tmp/stage-deps-uniq.txt
-      while read -r lib; do
-        dest="$fhsroot/usr/lib/$(basename "$lib")"
-        [ -e "$dest" ] && continue
-        cp -aL --no-preserve=ownership "$lib" "$dest" 2>/dev/null || true
-      done < /tmp/stage-deps-uniq.txt
-    }
-
-    stageTool ${bison}
-    stageTool ${gettext}
-    stageTool ${python3Minimal}
-    stageTool ${gnum4}
-    stageTool ${pkgs.gzip}
-    ln -sf bison "$fhsroot/usr/bin/yacc" 2>/dev/null || true
-
-    # gzip's own wrapper SCRIPT (not just its shebang) hardcodes the
-    # absolute store path to the real .gzip-wrapped binary via `exec -a
-    # "$0" "/nix/store/.../gzip-1.14/bin/.gzip-wrapped"` -- confirmed via
-    # a real "No such file or directory" failure, since stageTool
-    # flattens everything into /usr/bin and that store path doesn't
-    # exist inside the chroot. Rewrite it, same class of fix as the
-    # linker-script store-path rewriting toolchain.nix already does.
-    sed -i "s|${pkgs.gzip}/bin/|/usr/bin/|g" "$fhsroot/usr/bin/gzip" "$fhsroot/usr/bin/gunzip" "$fhsroot/usr/bin/zcat" 2>/dev/null || true
-
-    # bison looks for its own data files (m4sugar macros etc.) at
-    # share/bison relative to its own store path by default (confirmed:
-    # "m4sugar.m4: cannot open: No such file or directory" -- stageTool
-    # only ever copies bin/). Stage share/bison for real and point
-    # BISON_PKGDATADIR at its chroot-relative location.
-    mkdir -p "$fhsroot/usr/share"
-    cp -a --no-preserve=ownership ${bison}/share/bison "$fhsroot/usr/share/bison"
-    chmod -R u+w "$fhsroot/usr/share/bison"
-    export BISON_PKGDATADIR=/usr/share/bison
-
-    # Python looks for its stdlib at ../lib/pythonX.Y relative to its own
-    # executable by default (confirmed: "ModuleNotFoundError: No module
-    # named 'encodings'" -- stageTool only copies bin/, never lib/).
-    # Stage the real stdlib dir alongside /usr/bin/python3 at the
-    # relative path it actually searches. Version derived from
-    # pythonVersion, not hardcoded -- a version bump in nixpkgs
-    # (confirmed: 3.13 -> 3.14 between two revisions used in this
-    # project) would otherwise silently break this with a real
-    # "No such file or directory" on the old hardcoded path.
-    cp -a --no-preserve=ownership ${python3Minimal}/lib/python${pythonVersion} "$fhsroot/usr/lib/python${pythonVersion}"
-    chmod -R u+w "$fhsroot/usr/lib/python${pythonVersion}"
-
-    # nixpkgs' python3Minimal has its own subprocess.py PATCHED to hardcode
-    # the exact bash STORE PATH used at ITS build time for shell=True calls
-    # (since plain /bin/sh isn't guaranteed inside a Nix build sandbox
-    # either) -- confirmed via a real
-    # "FileNotFoundError: .../bash-5.3p9/bin/sh" failure mid-glibc-build.
-    # Preserve that exact store path's shape inside the chroot, same
-    # pattern already used for gcc-unwrapped's own libexec lookup.
-    __py_bash_sh=$(grep -oE '/nix/store/[a-z0-9]+-bash-[0-9.p]+/bin/sh' ${python3Minimal}/lib/python${pythonVersion}/subprocess.py | head -1)
-    if [ -n "$__py_bash_sh" ]; then
-      mkdir -p "$fhsroot$(dirname "$__py_bash_sh")"
-      ln -sf /usr/bin/bash "$fhsroot$__py_bash_sh"
-      # gzip's own wrapper script has a #! shebang pointing at
-      # .../bin/bash (not .../bin/sh) at that SAME store path --
-      # confirmed via "bad interpreter: No such file or directory" on a
-      # real `run /tmp gzip --version`. Stage both names.
-      ln -sf /usr/bin/bash "$fhsroot$(dirname "$__py_bash_sh")/bash"
-    fi
-
-    # bison has the exact store path to m4 HARDCODED (confirmed via
-    # strings on the bison binary + a real "bison: m4 subprocess failed:
-    # No such file or directory" failure -- staging m4 at /usr/bin alone
-    # is not enough, bison never consults PATH for this). Preserve that
-    # exact store-path shape inside the chroot, same pattern already
-    # used for gcc-unwrapped's libexec lookup and python3's subprocess.py.
-    __bison_m4=$(strings ${bison}/bin/bison | grep -oE '/nix/store/[a-z0-9]+-gnum4-[0-9.]+/bin/m4' | head -1)
-    if [ -n "$__bison_m4" ]; then
-      mkdir -p "$fhsroot$(dirname "$__bison_m4")"
-      ln -sf /usr/bin/m4 "$fhsroot$__bison_m4"
-    fi
-
-    echo "=== staged bison/gettext/python3, sanity check ==="
-    run /tmp bison --version | head -1
-    run /tmp msgfmt --version | head -1
-    run /tmp python3 --version
+    # Stage glibc's OWN real build-time deps (bison, gettext/msgfmt,
+    # python3Minimal, m4, gzip) plus every path-hardcoding fixup each
+    # one needs -- see toolchain.nix's own stageGlibcBuildDeps comment
+    # for the full, individually-confirmed root cause behind each one.
+    stageGlibcBuildDeps
 
     mkdir -p "$fhsroot/usr/sbin"
 

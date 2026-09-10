@@ -23,6 +23,7 @@
 
 let
   toolchain = import ./toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ./gcc-configure-flags.nix;
   gccSrc = pkgs.gcc-unwrapped.src;
   gmpSrc = pkgs.gmp.src;
   mpfrSrc = pkgs.mpfr.src;
@@ -79,27 +80,7 @@ pkgs.stdenv.mkDerivation {
     run /tmp/gcc-build bash -c '
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec bash /tmp/gcc-src/configure \
-        --prefix=/usr \
-        --with-native-system-header-dir=/usr/include \
-        --with-build-sysroot=/ \
-        --disable-multilib \
-        --disable-bootstrap \
-        --disable-libsanitizer \
-        --disable-libgomp \
-        --disable-libatomic \
-        --disable-libssp \
-        --disable-libquadmath \
-        --disable-libitm \
-        --disable-libvtv \
-        --enable-languages=c,c++ \
-        --enable-shared \
-        --enable-static \
-        --enable-threads=posix \
-        --enable-__cxa_atexit \
-        --enable-long-long \
-        --disable-libcc1 \
-        --disable-plugin \
-        --disable-nls
+        ${gccConfigureFlags}
     ' > /tmp/gcc-configure.log 2>&1
     # --disable-libgomp/libatomic/libssp/libquadmath/libitm/libvtv:
     # each of these runtime support libraries' own ./configure runs a
