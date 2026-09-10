@@ -111,19 +111,11 @@ pkgs.stdenv.mkDerivation {
     mkdir -p "$builddir"
 
     echo "--- gcc stage 2: configure (CC/CXX = the STAGE-1 self-built compiler) ---"
-    set +e
-    run /tmp/gcc2-build bash -c '
+    runStep "GCC STAGE 2 CONFIGURE" /tmp/gcc2-configure.log 150 /tmp/gcc2-build bash -c '
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec bash /tmp/gcc2-src/configure \
         ${gccConfigureFlags}
-    ' > /tmp/gcc2-configure.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -150 /tmp/gcc2-configure.log
-      echo "GCC STAGE 2 CONFIGURE FAILED (exit $status)"
-      exit 1
-    fi
+    '
     echo "gcc stage 2: configure OK"
 
     echo "--- gcc stage 2: make (this is a real, full gcc build, compiled BY a self-built gcc -- expect a long time) ---"
@@ -144,15 +136,7 @@ pkgs.stdenv.mkDerivation {
     echo "gcc stage 2: make OK -- the self-built gcc successfully compiled real gcc source"
 
     echo "--- gcc stage 2: make install (overwrites stage 1's own /usr/bin/gcc etc with the stage-2 build) ---"
-    set +e
-    run /tmp/gcc2-build make install > /tmp/gcc2-install.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -100 /tmp/gcc2-install.log
-      echo "GCC STAGE 2 INSTALL FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GCC STAGE 2 INSTALL" /tmp/gcc2-install.log 100 /tmp/gcc2-build make install
     echo "gcc stage 2: configure+make+install OK -- STAGE-2 gcc now occupies /usr"
 
     stage2_gcc_hash=$(sha256sum "$fhsroot/usr/bin/gcc" | cut -d' ' -f1)

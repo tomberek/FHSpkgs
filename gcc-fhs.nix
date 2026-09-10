@@ -76,12 +76,6 @@ pkgs.stdenv.mkDerivation {
     mkdir -p "$builddir"
 
     echo "--- gcc: configure ---"
-    set +e
-    run /tmp/gcc-build bash -c '
-      export CC=/usr/bin/gcc CXX=/usr/bin/g++
-      exec bash /tmp/gcc-src/configure \
-        ${gccConfigureFlags}
-    ' > /tmp/gcc-configure.log 2>&1
     # --disable-libgomp/libatomic/libssp/libquadmath/libitm/libvtv:
     # each of these runtime support libraries' own ./configure runs a
     # real "can this chroot execute a program I just compiled" check
@@ -120,13 +114,11 @@ pkgs.stdenv.mkDerivation {
     # (real precedent, not a workaround unique to this harness) --
     # nixpkgs' toolchain always has `find` available, so it never hit
     # this second bug.
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -150 /tmp/gcc-configure.log
-      echo "GCC CONFIGURE FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GCC CONFIGURE" /tmp/gcc-configure.log 150 /tmp/gcc-build bash -c '
+      export CC=/usr/bin/gcc CXX=/usr/bin/g++
+      exec bash /tmp/gcc-src/configure \
+        ${gccConfigureFlags}
+    '
     echo "gcc: configure OK"
 
     echo "--- gcc: make (this is a real, full gcc build -- expect a long time) ---"
@@ -147,15 +139,7 @@ pkgs.stdenv.mkDerivation {
     echo "gcc: make OK"
 
     echo "--- gcc: make install ---"
-    set +e
-    run /tmp/gcc-build make install > /tmp/gcc-install.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -100 /tmp/gcc-install.log
-      echo "GCC INSTALL FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GCC INSTALL" /tmp/gcc-install.log 100 /tmp/gcc-build make install
     echo "gcc: configure+make+install OK -- SELF-BUILT gcc now occupies /usr"
 
     echo "=== real end-to-end test: compile+link+run a real C AND C++ program with the SELF-BUILT gcc/g++ ==="

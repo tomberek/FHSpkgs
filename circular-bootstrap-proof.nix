@@ -133,8 +133,7 @@ rootsbindir=/usr/bin
 EOF
 
     echo "--- glibc2: configure ---"
-    set +e
-    run /tmp/glibc2-build bash -c '
+    runStep "GLIBC2 CONFIGURE" /tmp/glibc2-configure.log 150 /tmp/glibc2-build bash -c '
       export CC=/usr/bin/gcc
       exec bash /tmp/glibc2-src/configure \
         --prefix=/usr \
@@ -143,39 +142,16 @@ EOF
         --disable-werror \
         --enable-kernel=3.10.0 \
         libc_cv_slibdir=/usr/lib
-    ' > /tmp/glibc2-configure.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -150 /tmp/glibc2-configure.log
-      echo "GLIBC2 CONFIGURE FAILED (exit $status)"
-      exit 1
-    fi
+    '
     echo "glibc2: configure OK"
 
     echo "--- glibc2: make (this is a real, full glibc build compiled BY the self-built toolchain -- expect several minutes) ---"
-    set +e
-    run /tmp/glibc2-build make -j"$(nproc)" > /tmp/glibc2-make.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -200 /tmp/glibc2-make.log
-      echo "GLIBC2 MAKE FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GLIBC2 MAKE" /tmp/glibc2-make.log 200 /tmp/glibc2-build make -j"$(nproc)"
     echo "glibc2: make OK"
 
     echo "--- glibc2: make install (staged, then merged into /usr -- same hazard/fix as glibc-rebuild.nix's own install step) ---"
     mkdir -p "$fhsroot/tmp/glibc2-stage"
-    set +e
-    run /tmp/glibc2-build make install DESTDIR=/tmp/glibc2-stage > /tmp/glibc2-install.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -100 /tmp/glibc2-install.log
-      echo "GLIBC2 INSTALL FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GLIBC2 INSTALL" /tmp/glibc2-install.log 100 /tmp/glibc2-build make install DESTDIR=/tmp/glibc2-stage
     cp -a --no-preserve=ownership "$fhsroot/tmp/glibc2-stage/usr/lib/." "$fhsroot/usr/lib/"
     cp -a --no-preserve=ownership "$fhsroot/tmp/glibc2-stage/usr/include/." "$fhsroot/usr/include/"
     find "$fhsroot/tmp/glibc2-stage/usr" -mindepth 1 -maxdepth 1 -not -name lib -not -name include | while read -r d; do
@@ -213,43 +189,19 @@ EOF
     mkdir -p "$gbuilddir"
 
     echo "--- gcc2: configure ---"
-    set +e
-    run /tmp/gcc2-build bash -c '
+    runStep "GCC2 CONFIGURE" /tmp/gcc2-configure.log 150 /tmp/gcc2-build bash -c '
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec bash /tmp/gcc2-src/configure \
         ${gccConfigureFlags}
-    ' > /tmp/gcc2-configure.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -150 /tmp/gcc2-configure.log
-      echo "GCC2 CONFIGURE FAILED (exit $status)"
-      exit 1
-    fi
+    '
     echo "gcc2: configure OK"
 
     echo "--- gcc2: make (this is a real, full gcc build compiled BY the fully self-built toolchain -- expect a long time) ---"
-    set +e
-    run /tmp/gcc2-build make -j"$(nproc)" > /tmp/gcc2-make.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -200 /tmp/gcc2-make.log
-      echo "GCC2 MAKE FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GCC2 MAKE" /tmp/gcc2-make.log 200 /tmp/gcc2-build make -j"$(nproc)"
     echo "gcc2: make OK -- the fully self-built toolchain successfully compiled real gcc source"
 
     echo "--- gcc2: make install ---"
-    set +e
-    run /tmp/gcc2-build make install > /tmp/gcc2-install.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -100 /tmp/gcc2-install.log
-      echo "GCC2 INSTALL FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GCC2 INSTALL" /tmp/gcc2-install.log 100 /tmp/gcc2-build make install
     echo "gcc2: configure+make+install OK -- STAGE-4 gcc now occupies /usr"
 
     gcc2_hash=$(sha256sum "$fhsroot/usr/bin/gcc" | cut -d' ' -f1)

@@ -659,6 +659,33 @@ WRAP
     ' -- "$__run_wd" "$@"
   }
 
+  # runStep(label, logfile, tailN, wd, cmd...) -- runs `cmd` via run(),
+  # capturing its exit status around a `set +e`/`set -e` bracket (a
+  # bare `run ... || exit 1` under `set -e` would work for the exit
+  # itself, but would skip printing the log first) and, on failure,
+  # tails the last `tailN` lines of `logfile` before exiting the whole
+  # build with a real, labeled failure message. Every hand-rolled
+  # gcc/glibc configure-make-install step in this project (gcc-fhs.nix,
+  # gcc-stage2.nix, glibc-rebuild.nix, circular-bootstrap-proof.nix) used
+  # to repeat this exact five-line bracket -- extracted here once those
+  # four files' copies were confirmed byte-identical in shape (only the
+  # label, log path, and tail length varied). NOT used by
+  # buildAutotools/buildMake below, which already have their own
+  # (near-identical, but pre-existing and not worth re-deriving) version
+  # of this same idea baked directly into their bodies.
+  runStep() {
+    __rs_label="$1"; __rs_log="$2"; __rs_tail="$3"; __rs_wd="$4"; shift 4
+    set +e
+    run "$__rs_wd" "$@" > "$__rs_log" 2>&1
+    __rs_status=$?
+    set -e
+    if [ "$__rs_status" -ne 0 ]; then
+      tail -n "$__rs_tail" "$__rs_log"
+      echo "$__rs_label FAILED (exit $__rs_status)"
+      exit 1
+    fi
+  }
+
   # __unpackSource(destdir, src) -- unpacks src (a REAL upstream tarball
   # -- .tar.gz/.tar.xz/.tar.bz2/.tar.lz -- or an already-unpacked
   # fetchFromGitHub-style directory) into destdir. Shared by

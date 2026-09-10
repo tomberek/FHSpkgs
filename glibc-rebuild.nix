@@ -132,8 +132,7 @@ GCCNORPATH
     chmod +x "$fhsroot/usr/bin/gcc-norpath"
 
     echo "--- glibc: configure ---"
-    set +e
-    run /tmp/glibc-build bash -c '
+    runStep "GLIBC CONFIGURE" /tmp/glibc-configure.log 150 /tmp/glibc-build bash -c '
       export CC=/usr/bin/gcc-norpath
       exec bash /tmp/glibc-src/configure \
         --prefix=/usr \
@@ -142,26 +141,11 @@ GCCNORPATH
         --disable-werror \
         --enable-kernel=3.10.0 \
         libc_cv_slibdir=/usr/lib
-    ' > /tmp/glibc-configure.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -150 /tmp/glibc-configure.log
-      echo "GLIBC CONFIGURE FAILED (exit $status)"
-      exit 1
-    fi
+    '
     echo "glibc: configure OK"
 
     echo "--- glibc: make (this is a real, full glibc build -- expect several minutes) ---"
-    set +e
-    run /tmp/glibc-build make -j"$(nproc)" > /tmp/glibc-make.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -200 /tmp/glibc-make.log
-      echo "GLIBC MAKE FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GLIBC MAKE" /tmp/glibc-make.log 200 /tmp/glibc-build make -j"$(nproc)"
     echo "glibc: make OK"
 
     echo "--- glibc: make install ---"
@@ -181,15 +165,7 @@ GCCNORPATH
     # let you override --prefix at install time, precisely because
     # in-place reinstallation over a live system is unsafe).
     mkdir -p "$fhsroot/tmp/glibc-stage"
-    set +e
-    run /tmp/glibc-build make install DESTDIR=/tmp/glibc-stage > /tmp/glibc-install.log 2>&1
-    status=$?
-    set -e
-    if [ "$status" -ne 0 ]; then
-      tail -100 /tmp/glibc-install.log
-      echo "GLIBC INSTALL FAILED (exit $status)"
-      exit 1
-    fi
+    runStep "GLIBC INSTALL" /tmp/glibc-install.log 100 /tmp/glibc-build make install DESTDIR=/tmp/glibc-stage
     echo "glibc: install to staging OK -- now merging into /usr"
 
     # Merge (not wholesale-replace) the staged tree's usr/lib and
