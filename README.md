@@ -19,29 +19,29 @@ file's own section below has the real command output and root causes.
 
 | File | Composes | Proves |
 | --- | --- | --- |
-| `bootstrap-proof.nix` | self-built gcc + binutils (glibc still bootstrap) | the two pieces work *together*, not just standalone |
-| `gcc-stage2.nix` | self-built gcc+binutils | gcc can compile *itself* (still runs against bootstrap glibc) |
-| `full-toolchain-proof.nix` | self-built gcc + binutils + **glibc** | all three are mutually ABI-compatible — the gap `bootstrap-proof.nix` left open |
-| `bootstrap-suite.nix` / `bootstrap-env.nix` | fully self-built toolchain | *every* package this project builds, not just zlib |
-| `circular-bootstrap-proof.nix` | fully self-built toolchain | binutils, glibc, *and* gcc all rebuild from source using **only** the self-built toolchain — no bootstrap copies involved |
+| `proofs/bootstrap-proof.nix` | self-built gcc + binutils (glibc still bootstrap) | the two pieces work *together*, not just standalone |
+| `toolchain/gcc-stage2.nix` | self-built gcc+binutils | gcc can compile *itself* (still runs against bootstrap glibc) |
+| `proofs/full-toolchain-proof.nix` | self-built gcc + binutils + **glibc** | all three are mutually ABI-compatible — the gap `proofs/bootstrap-proof.nix` left open |
+| `proofs/bootstrap-suite.nix` / `proofs/bootstrap-env.nix` | fully self-built toolchain | *every* package this project builds, not just zlib |
+| `proofs/circular-bootstrap-proof.nix` | fully self-built toolchain | binutils, glibc, *and* gcc all rebuild from source using **only** the self-built toolchain — no bootstrap copies involved |
 
 ## How nixpkgs is used — two separate roles, don't conflate them
 
-**1. Bootstrap toolchain (`toolchain.nix`)** — a handful of *prebuilt
+**1. Bootstrap toolchain (`lib/toolchain.nix`)** — a handful of *prebuilt
 nixpkgs binaries* (gcc, binutils, glibc, make, bash, coreutils, sed,
 grep, awk, lzip), copied into the chroot once, purely to get a working
 compiler + shell + coreutils running there. This is exactly the same
 role Nix's own `bootstrap-tools.tar.xz` or the guix-style `hex0` seed
 plays for Nix itself: a one-time bootstrapping convenience, not a claim
 that "the software is nixpkgs." Every reference to a prebuilt binary in
-`toolchain.nix` uses the local name `bootstrap.foo` (aliased from
+`lib/toolchain.nix` uses the local name `bootstrap.foo` (aliased from
 `pkgs`), specifically so it reads as "the bootstrap copy of foo," not
 "foo, full stop." Nothing about the package set depends on these being
 nixpkgs-built specifically — any working Linux gcc+binutils+coreutils
 would do the same job.
 
-**2. Package sources (one file per package, e.g. `zlib-fhs.nix`,
-`pigz-fhs.nix`, `xz-fhs.nix`, ...)** — every real package is built from
+**2. Package sources (one file per package, e.g. `pkgs/zlib-fhs.nix`,
+`pkgs/pigz-fhs.nix`, `pkgs/xz-fhs.nix`, ...)** — every real package is built from
 its `.src` attribute *only*: the raw upstream tarball or git tree
 nixpkgs' `fetchurl`/`fetchFromGitHub` already downloaded and
 hash-verified. `pkgs.foo.src` is a fetch, never a build. **Nixpkgs' own
@@ -58,7 +58,7 @@ gone; everything downstream sees only the real, from-source build.
 
 ## Recipes are short because the toolchain absorbs the repetition
 
-`toolchain.nix` exposes three functions to every derivation that splices
+`lib/toolchain.nix` exposes three functions to every derivation that splices
 it in (via `${toolchain}` in `buildPhase`):
 
 - **`run(workdir, cmd...)`** — executes `cmd` inside the chroot, with a
@@ -92,7 +92,7 @@ per package.
 ## Output: `$out/usr/{bin,lib,include,...}` contains only what THIS package built
 
 Each derivation's `installPhase` calls `installOnlyNew "$out"`
-(`toolchain.nix`), not a blanket copy of the chroot. Copying the whole
+(`lib/toolchain.nix`), not a blanket copy of the chroot. Copying the whole
 `$fhsroot/usr` verbatim was the first approach tried, and it was wrong:
 every package's `$out` ended up containing the *entire bootstrap
 toolchain* (glibc, gcc, binutils, make, bash, coreutils, sed, grep, awk)
@@ -101,7 +101,7 @@ in addition to its own build — meaning every single package appeared to
 minimal, precise per-package outputs for an environment composer to
 union together.
 
-The real mechanism: `toolchain.nix` calls `snapshotToolchain()` once,
+The real mechanism: `lib/toolchain.nix` calls `snapshotToolchain()` once,
 right after bootstrap staging finishes and before any real package
 build — it records a path→hash snapshot of everything under
 `$fhsroot/usr` at that point. `installOnlyNew(destdir)`, called from
@@ -110,15 +110,15 @@ build and copies into `destdir` only what's new or changed since that
 snapshot — so a package that legitimately overwrites a bootstrap tool via
 its own real `make install` (coreutils/bash/gnused/gnugrep/gawk all do
 this) is correctly included, while everything the package's build never
-touched is correctly excluded. `pigz-fhs.nix` and `acl-fhs.nix` (which
+touched is correctly excluded. `pkgs/pigz-fhs.nix` and `pkgs/acl-fhs.nix` (which
 build a real dependency — zlib, attr — internally first) call
 `snapshotToolchain` a second time right after that dependency's build, so
 the primary package's own diff excludes the dependency's files too — the
 dependency has its own standalone file, and an environment composer is
 expected to pull it in as a real dependency edge, not have it silently
-duplicated into every consumer. Confirmed concretely: `pigz-fhs.nix`'s
+duplicated into every consumer. Confirmed concretely: `pkgs/pigz-fhs.nix`'s
 `$out` contains exactly 2 files (`pigz`, `unpigz`) with zero trace of the
-zlib it linked against; `acl-fhs.nix`'s `$out` is entirely acl's own
+zlib it linked against; `pkgs/acl-fhs.nix`'s `$out` is entirely acl's own
 files with zero trace of the attr it built first.
 
 `dontFixup = true` is set on every derivation alongside this, so
@@ -134,26 +134,36 @@ requires the same nested-chroot mechanism (`unshare --user
 
 ## Files
 
-- `toolchain.nix` — the bootstrap toolchain +
+- `lib/toolchain.nix` — the bootstrap toolchain +
   `run`/`buildAutotools`/`buildMake`/`snapshotToolchain`/`installOnlyNew`
   helpers. Import and splice via `${toolchain}`.
-- One `<pkg>-fhs.nix` file per package (`zlib-fhs.nix`, `xz-fhs.nix`,
-  `coreutils-fhs.nix`, ...) — each a short, standalone `nix-build`able
-  derivation naming only its own real `.src` and recipe. `pigz-fhs.nix`
-  and `acl-fhs.nix` each build one real dependency (`zlib`, `attr`
-  respectively) from source first, in the same chroot, since every
-  derivation here is isolated — there's no shared store of
-  already-built packages to pull from between files.
+- `lib/mkFhsPackage.nix` — shared derivation shape for the simple
+  `pkgs/*.nix` packages (see its own header comment for what it does and
+  deliberately doesn't do).
+- `lib/gcc-configure-flags.nix` — the gcc configure flag list shared by
+  every file in `toolchain/` that builds gcc from source.
+- One `pkgs/<pkg>-fhs.nix` file per simple package (`pkgs/zlib-fhs.nix`,
+  `pkgs/xz-fhs.nix`, `pkgs/coreutils-fhs.nix`, ...) — each a short,
+  standalone `nix-build`able derivation naming only its own real `.src`
+  and recipe. `pkgs/pigz-fhs.nix` and `pkgs/acl-fhs.nix` each build one
+  real dependency (`zlib`, `attr` respectively) from source first, in
+  the same chroot, since every derivation here is isolated — there's no
+  shared store of already-built packages to pull from between files.
+- `toolchain/` — the core self-hosted toolchain pieces (binutils, gcc,
+  glibc), each built from real upstream source rather than borrowed
+  from nixpkgs. See "Self-hosting the core toolchain" below.
+- `proofs/` — the escalating self-hosting proof files (see the summary
+  table above).
 
 ## Composing everything together: `env-fhs.nix`
 
 `env-fhs.nix` unions all 19 packages' outputs into one combined `/usr`
 tree, plus a real bootstrap runtime layer underneath (glibc/gcc/binutils
-etc. from `toolchain.nix` — none of the 19 packages provide these; they
+etc. from `lib/toolchain.nix` — none of the 19 packages provide these; they
 were explicitly excluded from every package's own output by
 `installOnlyNew`, so the union has to supply them from somewhere). Note
 that the bootstrap layer's own binutils is still a prebuilt nixpkgs
-binary, distinct from `binutils-fhs.nix` (a real from-source build of
+binary, distinct from `toolchain/binutils-fhs.nix` (a real from-source build of
 `as`/`ld`/`nm`/`objdump`/`ar`/`ranlib`/etc.) — the union legitimately
 overwrites the bootstrap's placeholder binutils with the from-source
 one, same pattern as coreutils/bash/gnused/gnugrep/gawk.
@@ -169,7 +179,7 @@ store path would dangle the instant `/nix` disappears. Instead,
 `env-fhs.nix` **hardlinks** each package's files into the combined tree
 (falling back to `cp -a` on `EXDEV`) — no `/nix` dependency at runtime,
 no data duplication on disk (same inode as the original store path),
-same fallback pattern `toolchain.nix` already uses everywhere else.
+same fallback pattern `lib/toolchain.nix` already uses everywhere else.
 
 **Conflict detection matches `htc-comp::merge()`'s semantics** (the
 referenced axios project's composition monoid): two packages claiming
@@ -202,9 +212,9 @@ pigz round-trip + grep/sed/awk pipeline + `ptx --version`, proving the
 composed output is self-contained and usable on its own, not merely
 self-consistent during its own build.
 
-## Self-hosting the core toolchain: `binutils-fhs.nix`, `glibc-rebuild.nix`, `gcc-fhs.nix`
+## Self-hosting the core toolchain: `toolchain/binutils-fhs.nix`, `toolchain/glibc-rebuild.nix`, `toolchain/gcc-fhs.nix`
 
-The bootstrap toolchain (`toolchain.nix`) borrows glibc/binutils/gcc
+The bootstrap toolchain (`lib/toolchain.nix`) borrows glibc/binutils/gcc
 wholesale, prebuilt, from nixpkgs — real, but not proof that this set
 could produce its *own* toolchain, not just userland tools built by
 someone else's. Three files close that gap by building each piece from
@@ -213,12 +223,12 @@ compiler (the same two-tier role every other package's build plays
 here — the bootstrap copy's only job is to build the real thing, never
 claimed to *be* the software):
 
-- **`binutils-fhs.nix`** — real `as`/`ld`/`nm`/`objdump`/`ar`/`ranlib`/
+- **`toolchain/binutils-fhs.nix`** — real `as`/`ld`/`nm`/`objdump`/`ar`/`ranlib`/
   `strip`/`readelf`/etc., built from the real `binutils-with-gold`
   tarball. Part of `env-fhs`'s union (legitimately overwrites the
   bootstrap toolchain's prebuilt binutils, same overwrite pattern as
   coreutils/bash/gnused/gnugrep/gawk).
-- **`glibc-rebuild.nix`** — real, *unpatched* upstream glibc (deliberately
+- **`toolchain/glibc-rebuild.nix`** — real, *unpatched* upstream glibc (deliberately
   not nixpkgs' own glibc, which patches `LD_SO_CACHE`/`LD_SO_CONF` to
   point at its own store path instead of plain `/etc` — see the file's
   own header comment). Confirmed the resulting loader genuinely reads
@@ -226,7 +236,7 @@ claimed to *be* the software):
   Kept standalone, *not* part of `env-fhs`'s union — swapping the C
   library live carries real ABI-conflict hazards for anything already
   running (confirmed the hard way; see the file's own history).
-- **`gcc-fhs.nix`** — real gcc (`--enable-languages=c,c++` only,
+- **`toolchain/gcc-fhs.nix`** — real gcc (`--enable-languages=c,c++` only,
   `--disable-bootstrap`), with gmp/mpfr/mpc staged as in-tree source
   subdirectories the exact way upstream's own
   `contrib/download_prerequisites` does it (extract each real tarball,
@@ -237,7 +247,7 @@ claimed to *be* the software):
   link, and run correctly with the just-built `gcc`/`g++`.
 
 Building these surfaced several real, general bootstrap gaps now fixed
-in shared `toolchain.nix` (not just worked around per-file): `/usr/bin/sh`
+in shared `lib/toolchain.nix` (not just worked around per-file): `/usr/bin/sh`
 (some build systems invoke `sh` via `$PATH`, not the hardcoded `/bin/sh`
 every package already needed), `/lib64/ld-linux-x86-64.so.2` (gcc's own
 not-yet-installed stage-1 compiler embeds this as its default dynamic-
@@ -249,17 +259,17 @@ bootstrap toolchain itself (gcc's `make install` tars up headers with a
 plain `tar -cf -` pipeline *inside* the chroot, not the outer sandbox's
 tar used only to unpack sources before chrooting).
 
-## Capstone: `bootstrap-proof.nix` — the self-built toolchain building real software
+## Capstone: `proofs/bootstrap-proof.nix` — the self-built toolchain building real software
 
-Each of `binutils-fhs.nix`/`glibc-rebuild.nix`/`gcc-fhs.nix` proves its
+Each of `toolchain/binutils-fhs.nix`/`toolchain/glibc-rebuild.nix`/`toolchain/gcc-fhs.nix` proves its
 own piece works standalone — but that's not the same as proving they
-work *together*, as an actual toolchain. `bootstrap-proof.nix` composes
-self-built gcc (`gcc-fhs.nix`) and self-built binutils
-(`binutils-fhs.nix`) into one chroot, overlaid on the normal bootstrap
+work *together*, as an actual toolchain. `proofs/bootstrap-proof.nix` composes
+self-built gcc (`toolchain/gcc-fhs.nix`) and self-built binutils
+(`toolchain/binutils-fhs.nix`) into one chroot, overlaid on the normal bootstrap
 staging, then uses *only* that composed compiler+linker to build a real
 third-party package (zlib) from real source, end to end.
 
-Deliberately excludes `glibc-rebuild.nix`'s self-built glibc from this
+Deliberately excludes `toolchain/glibc-rebuild.nix`'s self-built glibc from this
 composition: `gcc-fhs`/`binutils-fhs` were themselves built using the
 *bootstrap* toolchain's glibc as their own C library at build time (see
 each file's own `buildPhase`), so their binaries are ABI-compatible with
@@ -273,8 +283,8 @@ into that hazard.
 
 Verification goes beyond "the build exited 0": the gcc and `ld.bfd`
 binaries actually active in the chroot during zlib's build are
-SHA-256-hashed and compared directly against `gcc-fhs.nix`'s and
-`binutils-fhs.nix`'s own independent store outputs, confirming the
+SHA-256-hashed and compared directly against `toolchain/gcc-fhs.nix`'s and
+`toolchain/binutils-fhs.nix`'s own independent store outputs, confirming the
 composed pieces genuinely ran — not a silent fallback to the bootstrap
 copies underneath. Confirmed byte-identical for both. zlib's own real
 `configure && make && make install` then succeeds using only that
@@ -284,20 +294,20 @@ compile+link+run smoke test every other package here uses (zero
 call succeeds).
 
 One real bug found composing the two outputs, fixed in
-`bootstrap-proof.nix` itself: the bootstrap toolchain's own `/usr/bin/ld`
+`proofs/bootstrap-proof.nix` itself: the bootstrap toolchain's own `/usr/bin/ld`
 is a *symlink* to `ld.bfd`, while `binutils-fhs`'s own output has both
 as real (hardlinked) files — a blanket `cp -a src/. dst/` overlay onto
 that existing symlink corrupts both (GNU `cp` writes *through* an
 existing destination symlink rather than replacing it). Fixed by
 reusing `env-fhs.nix`'s own established overwrite pattern
 (`rm -f "$dest"` before each file, not a directory-level copy) —
-promoted into shared `toolchain.nix` as `overlayPackage()` once a
+promoted into shared `lib/toolchain.nix` as `overlayPackage()` once a
 second file needed the same composition.
 
-## Extending the proof: `bootstrap-suite.nix` — the whole package set, not just one library
+## Extending the proof: `proofs/bootstrap-suite.nix` — the whole package set, not just one library
 
-`bootstrap-proof.nix` shows the composed toolchain builds *a* real
-library. `bootstrap-suite.nix` asks the stronger question: is it a
+`proofs/bootstrap-proof.nix` shows the composed toolchain builds *a* real
+library. `proofs/bootstrap-suite.nix` asks the stronger question: is it a
 general-purpose toolchain, or one that happens to work for zlib
 specifically? It rebuilds all 18 real packages this project already
 proved once against the *bootstrap* toolchain — zlib, pigz (the
@@ -313,16 +323,16 @@ new gap. This is 100% of the non-toolchain package set this project has
 ever built, proven again end to end with a self-built compiler+linker.
 
 Originally composed only self-built gcc+binutils (glibc excluded for the
-ABI-mismatch reasons `bootstrap-proof.nix`'s header documents). Since
-`full-toolchain-proof.nix` closed that gap, `bootstrap-suite-build.nix`
-(the shared script both this file and `bootstrap-env.nix` use) now
+ABI-mismatch reasons `proofs/bootstrap-proof.nix`'s header documents). Since
+`proofs/full-toolchain-proof.nix` closed that gap, `proofs/bootstrap-suite-build.nix`
+(the shared script both this file and `proofs/bootstrap-env.nix` use) now
 composes the fully self-built gcc+binutils+glibc — confirmed via the
 same hash-verification pattern, and all 18 functional checks still pass
 unchanged with glibc included too.
 
 Two more real, non-obvious bugs found here:
 
-1. Fixed in shared `toolchain.nix`'s `run()`: once this suite's own
+1. Fixed in shared `lib/toolchain.nix`'s `run()`: once this suite's own
    from-source `bash` build overwrites `/usr/bin/bash` with a binary
    compiled by the composed, *unwrapped* self-built gcc (no automatic
    `-Wl,-rpath,/usr/lib` injection, unlike the normal wrapped
@@ -335,7 +345,7 @@ Two more real, non-obvious bugs found here:
    by exporting it in the *outer* `unshare` bash instead, before
    `chroot` `exec`s into the target bash (environment variables survive
    `exec`).
-2. Fixed in `bootstrap-suite.nix` itself: `pigz-fhs.nix`/`acl-fhs.nix`
+2. Fixed in `proofs/bootstrap-suite.nix` itself: `pkgs/pigz-fhs.nix`/`pkgs/acl-fhs.nix`
    each call `snapshotToolchain()` a *second* time to scope their own
    `$out` down to just the named package (excluding an internal
    dependency they build first). Copying that same pattern into a file
@@ -370,11 +380,11 @@ nix run .#bootstrap-shell -- -c 'gcc --version'
 nix develop                            # fhs-shell is on PATH
 ```
 
-`bootstrap-shell` is `fhs-shell`'s counterpart for `bootstrap-env.nix`
-(same build as `bootstrap-suite.nix`, but installing the full `/usr`
+`bootstrap-shell` is `fhs-shell`'s counterpart for `proofs/bootstrap-env.nix`
+(same build as `proofs/bootstrap-suite.nix`, but installing the full `/usr`
 tree instead of a diff) — every binary in it, gcc, binutils, *and glibc*
 included, was built by the fully self-built toolchain, not borrowed from
-nixpkgs (see `full-toolchain-proof.nix` for how the earlier gcc+binutils-
+nixpkgs (see `proofs/full-toolchain-proof.nix` for how the earlier gcc+binutils-
 only composition's ABI gap was closed). This is the difference between
 "the build log says it passed" and "you can actually use it" — `nix run
 .#bootstrap-shell -- -c 'gcc -o t t.c && ./t'` really compiles and runs a
@@ -389,7 +399,7 @@ Two real gaps this surfaced, both fixed in `mkComposedShell`:
 1. `/usr/bin/gcc`/`g++` are wrapper scripts that `exec` the real
    `gcc-unwrapped` at its literal Nix store path (gcc's own driver looks
    up `libexec/gcc/<target>/<version>/` relative to itself —
-   `toolchain.nix` can't flatten this the way it does every other
+   `lib/toolchain.nix` can't flatten this the way it does every other
    bootstrap tool). That's invisible during this project's own
    *builds*, since Nix's build sandbox always has `/nix` mounted — but
    these shells materialize into a plain directory *outside* any Nix
@@ -405,21 +415,21 @@ Two real gaps this surfaced, both fixed in `mkComposedShell`:
    `"failed to run command '/usr/bin/bash': No such file or directory"`,
    the loader unable to resolve `libreadline.so.8` before a single line
    of its script runs) and `pigz` (`"libz.so.1: cannot open shared
-   object file"`). Fixed the same way `toolchain.nix`'s `run()` already
+   object file"`). Fixed the same way `lib/toolchain.nix`'s `run()` already
    fixed the identical ordering bug: export `LD_LIBRARY_PATH=/usr/lib`
    in the *outer* shell, before `chroot` `exec`s into the target bash —
    setting it inside that bash's own script is too late by construction.
    Also needed the same `/lib64/ld-linux-x86-64.so.2` symlink
-   `toolchain.nix` sets up for its own in-build chroot (gcc's raw,
+   `lib/toolchain.nix` sets up for its own in-build chroot (gcc's raw,
    unwrapped stage-1 output defaults to that interpreter path).
 
-## Self-hosting proof: `gcc-stage2.nix` — the self-built gcc compiles itself
+## Self-hosting proof: `toolchain/gcc-stage2.nix` — the self-built gcc compiles itself
 
-The classic self-hosting test, one level stronger than `bootstrap-suite.nix`
+The classic self-hosting test, one level stronger than `proofs/bootstrap-suite.nix`
 (which shows the composed self-built gcc+binutils build *other* real
-software): compose `gcc-fhs.nix` + `binutils-fhs.nix` on top of the
+software): compose `toolchain/gcc-fhs.nix` + `toolchain/binutils-fhs.nix` on top of the
 bootstrap toolchain (same overlay + hash-verification as
-`bootstrap-proof.nix`), then use the now-active, composed, self-built
+`proofs/bootstrap-proof.nix`), then use the now-active, composed, self-built
 `/usr/bin/gcc`/`g++` to configure+build+install *real upstream gcc source
 a second time* — i.e. gcc genuinely compiling itself, not just compiling
 other packages.
@@ -442,7 +452,7 @@ GCC STAGE-2 SELF-COMPILATION SUCCEEDED: real gcc source compiled by a self-built
 Two real, non-obvious bugs found and fixed to get here (both in the shared
 toolchain, so every package benefits, not just this one):
 
-1. **`--enable-static` missing from `gcc-fhs.nix`'s own configure.**
+1. **`--enable-static` missing from `toolchain/gcc-fhs.nix`'s own configure.**
    Without it, `libstdc++-v3`'s `Makefile` never even *attempts* to merge
    `libsupc++convenience.la`'s real `operator new`/`delete` object files
    (`del_op.o`, `new_op.o`, ...) into a real `libstdc++.a` — its "make a
@@ -451,7 +461,7 @@ toolchain, so every package benefits, not just this one):
    nixpkgs' own gcc recipe passes this flag unconditionally
    (`pkgs/development/compilers/gcc/common/configure-flags.nix`) — real
    precedent, not a workaround invented for this harness.
-2. **`findutils` was never staged in `toolchain.nix`'s bootstrap tool
+2. **`findutils` was never staged in `lib/toolchain.nix`'s bootstrap tool
    set** — a real, general gap, not gcc-specific. `--enable-static`
    *alone* was not sufficient: even with the flag on, the exact same
    "undefined reference to `operator delete(void*, unsigned long)'"
@@ -468,15 +478,15 @@ toolchain, so every package benefits, not just this one):
    (`genmddeps`, `genconstants`, `genenums`) relink statically
    (`-static-libstdc++ -static-libgcc`) against the incomplete archive.
    Fixed by staging `findutils` alongside the other bootstrap tools in
-   `toolchain.nix` — confirmed via direct `ar t`/`nm` inspection of the
+   `lib/toolchain.nix` — confirmed via direct `ar t`/`nm` inspection of the
    rebuilt `libstdc++.a` (all 191 objects present, including the sized-
    delete operator `_ZdlPvm`), and via a clean rebuild of
    `bootstrap-suite-fhs` and `env-fhs` with zero regressions.
 
-## Closing the gap: `full-toolchain-proof.nix` — self-built gcc+binutils+glibc, mutually compatible
+## Closing the gap: `proofs/full-toolchain-proof.nix` — self-built gcc+binutils+glibc, mutually compatible
 
-`bootstrap-proof.nix` deliberately excluded self-built glibc
-(`glibc-rebuild.nix`) from its composition — gcc-fhs/binutils-fhs were
+`proofs/bootstrap-proof.nix` deliberately excluded self-built glibc
+(`toolchain/glibc-rebuild.nix`) from its composition — gcc-fhs/binutils-fhs were
 themselves built using the *bootstrap* glibc as their C library, so
 mixing in glibc-rebuild's separately-built, unpatched-upstream glibc was
 a real, previously-confirmed ABI hazard (`GLIBC_ABI_DT_X86_64_PLT`,
@@ -484,7 +494,7 @@ a real, previously-confirmed ABI hazard (`GLIBC_ABI_DT_X86_64_PLT`,
 hypothetical).
 
 Investigating this surfaced a real, pre-existing regression first:
-`glibc-rebuild.nix`'s own standalone self-test had broken independently
+`toolchain/glibc-rebuild.nix`'s own standalone self-test had broken independently
 of anything else in this session — nixpkgs' glibc pin had drifted
 forward and now backports a real upstream commit
 (`GLIBC_ABI_GNU2_TLS`, [BZ #33129]) that plain 2.42.0 doesn't define, so
@@ -518,13 +528,13 @@ zlibVersion=1.3.2
 FULL TOOLCHAIN PROOF SUCCEEDED: self-built gcc+binutils+glibc are mutually ABI-compatible and coexist with the bootstrap tools; real zlib built and run using ONLY the fully self-built toolchain
 ```
 
-## True circular self-host: `circular-bootstrap-proof.nix`
+## True circular self-host: `proofs/circular-bootstrap-proof.nix`
 
-The strongest self-hosting claim this project makes. `gcc-stage2.nix`
+The strongest self-hosting claim this project makes. `toolchain/gcc-stage2.nix`
 proved gcc alone can be recompiled by a self-built gcc+binutils — but
 that self-built gcc was still linked against, and running against, the
 *bootstrap* glibc as its own runtime. This file goes further: using the
-FULLY self-built toolchain from `full-toolchain-proof.nix` (gcc+
+FULLY self-built toolchain from `proofs/full-toolchain-proof.nix` (gcc+
 binutils+glibc, all mutually ABI-compatible), it rebuilds **binutils,
 glibc, AND gcc** from real upstream source a second time — every core
 toolchain piece, compiled and run by the self-built toolchain rather
@@ -539,7 +549,7 @@ composed toolchain's raw, *unwrapped* `/usr/bin/gcc` (gcc-fhs's own
 binary, overlaid in place of the bootstrap's wrapped `gcc`) injects
 **neither** an RPATH on normal links **nor** a spurious
 `-dynamic-linker` flag on a `-static` link — confirmed directly via
-`readelf` before writing this file. That means `glibc-rebuild.nix`'s own
+`readelf` before writing this file. That means `toolchain/glibc-rebuild.nix`'s own
 `gcc-norpath` wrapper (built specifically to avoid the bootstrap
 toolchain's wrapped gcc injecting exactly those two things — see that
 file's own header comment) is unnecessary here: the composed self-built
@@ -581,8 +591,8 @@ trusting that assumption: `autoreconfHook` there exists only to apply a
 CVE patch and nixpkgs' own autotools-ification — real upstream bzip2
 ships a plain, hand-written `Makefile` (no `configure.ac`, confirmed by
 inspecting the real tarball) and never needed autoreconf to build at
-all. `bzip2-fhs.nix` builds it directly via the same `buildMake`
-mechanism `pigz-fhs.nix` already uses, no autoreconf involved — now part
+all. `pkgs/bzip2-fhs.nix` builds it directly via the same `buildMake`
+mechanism `pkgs/pigz-fhs.nix` already uses, no autoreconf involved — now part
 of `env-fhs`'s union (19 packages) with a real compress/decompress
 round-trip smoke test, both standalone and as the combined environment's
 13th cross-package smoke-test step.

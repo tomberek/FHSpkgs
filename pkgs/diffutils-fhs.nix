@@ -4,7 +4,7 @@
 # coreutils as a buildInput, but only to hardcode an absolute path to
 # `pr` at configure time (a build-time path hint, not something
 # linked) -- omitted here; configure falls back to searching $PATH.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "diffutils";
   build = "buildAutotools diffutils ${pkgs.diffutils.src}";

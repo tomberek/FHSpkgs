@@ -22,8 +22,8 @@
 # single-stage build using the existing seed compiler is.
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-  gccConfigureFlags = import ./gcc-configure-flags.nix;
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ../lib/gcc-configure-flags.nix;
   gccSrc = pkgs.gcc-unwrapped.src;
   gmpSrc = pkgs.gmp.src;
   mpfrSrc = pkgs.mpfr.src;

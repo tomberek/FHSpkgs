@@ -2,7 +2,7 @@
 
 # Only pkgs.gawk.src is used below. --without-readline is upstream's
 # own non-interactive, zero-optional-dep configuration.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "gawk";
   build = "buildAutotools gawk ${pkgs.gawk.src} --without-readline";

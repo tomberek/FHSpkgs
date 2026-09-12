@@ -21,7 +21,7 @@
 # see toolchain.nix's own header comment on this). A future CVE fix for
 # THIS harness's own bzip2 build would be a separate, explicit decision,
 # not silently inherited from nixpkgs' patch stack.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "bzip2";
   build = ''

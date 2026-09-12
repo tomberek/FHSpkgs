@@ -1,7 +1,7 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
+  toolchain = import ./lib/toolchain.nix { inherit pkgs; };
 
   # Every standalone package built so far. Each is its own isolated
   # derivation whose $out/usr contains ONLY what that package's own
@@ -16,26 +16,26 @@ let
   # shifted every later index, unioning the wrong store path under the
   # wrong name with no error. Names are the only stable handle.
   packages = {
-    zlib = import ./zlib-fhs.nix { inherit pkgs; };
-    pigz = import ./pigz-fhs.nix { inherit pkgs; };
-    xz = import ./xz-fhs.nix { inherit pkgs; };
-    diffutils = import ./diffutils-fhs.nix { inherit pkgs; };
-    findutils = import ./findutils-fhs.nix { inherit pkgs; };
-    gawk = import ./gawk-fhs.nix { inherit pkgs; };
-    patch = import ./patch-fhs.nix { inherit pkgs; };
-    attr = import ./attr-fhs.nix { inherit pkgs; };
-    acl = import ./acl-fhs.nix { inherit pkgs; };
-    gnugrep = import ./gnugrep-fhs.nix { inherit pkgs; };
-    file = import ./file-fhs.nix { inherit pkgs; };
-    gnutar = import ./gnutar-fhs.nix { inherit pkgs; };
-    gzip = import ./gzip-fhs.nix { inherit pkgs; };
-    ed = import ./ed-fhs.nix { inherit pkgs; };
-    bash = import ./bash-fhs.nix { inherit pkgs; };
-    gnused = import ./gnused-fhs.nix { inherit pkgs; };
-    coreutils = import ./coreutils-fhs.nix { inherit pkgs; };
-    patchelf = import ./patchelf-fhs.nix { inherit pkgs; };
-    binutils = import ./binutils-fhs.nix { inherit pkgs; };
-    bzip2 = import ./bzip2-fhs.nix { inherit pkgs; };
+    zlib = import ./pkgs/zlib-fhs.nix { inherit pkgs; };
+    pigz = import ./pkgs/pigz-fhs.nix { inherit pkgs; };
+    xz = import ./pkgs/xz-fhs.nix { inherit pkgs; };
+    diffutils = import ./pkgs/diffutils-fhs.nix { inherit pkgs; };
+    findutils = import ./pkgs/findutils-fhs.nix { inherit pkgs; };
+    gawk = import ./pkgs/gawk-fhs.nix { inherit pkgs; };
+    patch = import ./pkgs/patch-fhs.nix { inherit pkgs; };
+    attr = import ./pkgs/attr-fhs.nix { inherit pkgs; };
+    acl = import ./pkgs/acl-fhs.nix { inherit pkgs; };
+    gnugrep = import ./pkgs/gnugrep-fhs.nix { inherit pkgs; };
+    file = import ./pkgs/file-fhs.nix { inherit pkgs; };
+    gnutar = import ./pkgs/gnutar-fhs.nix { inherit pkgs; };
+    gzip = import ./pkgs/gzip-fhs.nix { inherit pkgs; };
+    ed = import ./pkgs/ed-fhs.nix { inherit pkgs; };
+    bash = import ./pkgs/bash-fhs.nix { inherit pkgs; };
+    gnused = import ./pkgs/gnused-fhs.nix { inherit pkgs; };
+    coreutils = import ./pkgs/coreutils-fhs.nix { inherit pkgs; };
+    patchelf = import ./pkgs/patchelf-fhs.nix { inherit pkgs; };
+    binutils = import ./toolchain/binutils-fhs.nix { inherit pkgs; };
+    bzip2 = import ./pkgs/bzip2-fhs.nix { inherit pkgs; };
   };
 
   # `unionPackage <name> <out>` once per entry, in the same order the

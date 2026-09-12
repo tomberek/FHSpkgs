@@ -5,7 +5,7 @@
 # also listed here in extraNativeBuildInputs because buildAutotools's
 # own unpack step runs in the OUTER build sandbox before anything is
 # chrooted.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "ed";
   extraNativeBuildInputs = [ pkgs.lzip ];

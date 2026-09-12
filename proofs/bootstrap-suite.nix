@@ -28,7 +28,7 @@
 # excluded glibc entirely for that reason; it no longer needs to.
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
   suiteBuild = import ./bootstrap-suite-build.nix { inherit pkgs; };
 in
 pkgs.stdenv.mkDerivation {

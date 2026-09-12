@@ -5,7 +5,7 @@
 # from source first, in this same chroot (each derivation here is
 # isolated -- there's no persistent store to pull an already-built
 # attr from).
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "acl";
   build = ''

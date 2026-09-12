@@ -51,8 +51,8 @@
 # long)'". See gcc-fhs.nix's own comment for the full root-cause trail.
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-  gccConfigureFlags = import ./gcc-configure-flags.nix;
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ../lib/gcc-configure-flags.nix;
   gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
   binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
   gccSrc = pkgs.gcc-unwrapped.src;

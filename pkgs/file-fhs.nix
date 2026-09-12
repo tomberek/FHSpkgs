@@ -3,7 +3,7 @@
 # Only pkgs.file.src is used below. --disable-zlib (+bzlib/xzlib)
 # skips the hard zlib/bzip2/xz buildInputs nixpkgs bakes in (upstream
 # configure supports disabling each codec independently).
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "file";
   build = "buildAutotools file ${pkgs.file.src} --disable-zlib --disable-bzlib --disable-xzlib";

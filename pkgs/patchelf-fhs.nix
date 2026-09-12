@@ -3,7 +3,7 @@
 # Only pkgs.patchelf.src is used below. A C++ tool -- needs nothing
 # beyond gcc/libstdc++ (already staged as g++ in the bootstrap
 # toolchain).
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "patchelf";
   build = "buildAutotools patchelf ${pkgs.patchelf.src}";

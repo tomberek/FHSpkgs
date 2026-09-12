@@ -3,7 +3,7 @@
 # Only pkgs.attr.src is used below. Trivial autotools build; nixpkgs'
 # multi-output split (bin/dev/out/man/doc) is cosmetic and skipped
 # here -- everything installs under one /usr prefix.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "attr";
   build = "buildAutotools attr ${pkgs.attr.src}";

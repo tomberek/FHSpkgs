@@ -3,7 +3,7 @@
 # Only pkgs.gnugrep.src is used below. --disable-perl-regexp skips the
 # hard pcre2 buildInput nixpkgs bakes in (upstream configure supports
 # this flag even though nixpkgs' own package.nix doesn't expose it).
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "gnugrep";
   build = "buildAutotools gnugrep ${pkgs.gnugrep.src} --disable-perl-regexp";

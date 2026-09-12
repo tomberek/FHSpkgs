@@ -3,7 +3,7 @@
 # Only pkgs.bash.src is used below. --disable-readline skips the
 # optional readline buildInput (nixpkgs' own non-interactive branch
 # flag).
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "bash";
   build = "buildAutotools bash ${pkgs.bash.src} --without-bash-malloc --disable-readline";

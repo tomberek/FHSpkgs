@@ -1,7 +1,7 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
 in
 pkgs.stdenv.mkDerivation {
   name = "binutils-fhs";

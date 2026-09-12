@@ -4,7 +4,7 @@
 # (nixpkgs gates them via aclSupport/attrSupport/gmpSupport overrides);
 # no explicit disable flag exists or is needed -- configure
 # auto-detects their absence, and they aren't built into this chroot.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "coreutils";
   build = "buildAutotools coreutils ${pkgs.coreutils.src}";

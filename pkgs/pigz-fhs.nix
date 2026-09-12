@@ -4,7 +4,7 @@
 # sources nixpkgs already fetched. pigz's own real Makefile links
 # against the zlib built moments earlier in this SAME chroot (real
 # /usr/lib + /usr/include), never against nixpkgs' own zlib build.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "pigz";
   build = ''

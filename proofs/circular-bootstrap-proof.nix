@@ -35,11 +35,11 @@
 # just "make exited 0".
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-  gccConfigureFlags = import ./gcc-configure-flags.nix;
-  gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
-  binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
-  glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
+  gccConfigureFlags = import ../lib/gcc-configure-flags.nix;
+  gccFhs = import ../toolchain/gcc-fhs.nix { inherit pkgs; };
+  binutilsFhs = import ../toolchain/binutils-fhs.nix { inherit pkgs; };
+  glibcRebuild = import ../toolchain/glibc-rebuild.nix { inherit pkgs; };
 
   binutilsSrc = pkgs.binutils-unwrapped.src;
 

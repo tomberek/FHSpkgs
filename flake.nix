@@ -31,34 +31,34 @@
           call = file: import file { inherit pkgs; };
         in
         rec {
-          zlib-fhs = call ./zlib-fhs.nix;
-          pigz-fhs = call ./pigz-fhs.nix;
-          xz-fhs = call ./xz-fhs.nix;
-          diffutils-fhs = call ./diffutils-fhs.nix;
-          findutils-fhs = call ./findutils-fhs.nix;
-          gawk-fhs = call ./gawk-fhs.nix;
-          patch-fhs = call ./patch-fhs.nix;
-          attr-fhs = call ./attr-fhs.nix;
-          acl-fhs = call ./acl-fhs.nix;
-          gnugrep-fhs = call ./gnugrep-fhs.nix;
-          file-fhs = call ./file-fhs.nix;
-          gnutar-fhs = call ./gnutar-fhs.nix;
-          gzip-fhs = call ./gzip-fhs.nix;
-          ed-fhs = call ./ed-fhs.nix;
-          bash-fhs = call ./bash-fhs.nix;
-          gnused-fhs = call ./gnused-fhs.nix;
-          coreutils-fhs = call ./coreutils-fhs.nix;
-          patchelf-fhs = call ./patchelf-fhs.nix;
-          binutils-fhs = call ./binutils-fhs.nix;
-          bzip2-fhs = call ./bzip2-fhs.nix;
-          gcc-fhs = call ./gcc-fhs.nix;
-          gcc-stage2-fhs = call ./gcc-stage2.nix;
-          glibc-rebuild-fhs = call ./glibc-rebuild.nix;
-          bootstrap-proof-fhs = call ./bootstrap-proof.nix;
-          full-toolchain-proof-fhs = call ./full-toolchain-proof.nix;
-          circular-bootstrap-proof-fhs = call ./circular-bootstrap-proof.nix;
-          bootstrap-suite-fhs = call ./bootstrap-suite.nix;
-          bootstrap-env-fhs = call ./bootstrap-env.nix;
+          zlib-fhs = call ./pkgs/zlib-fhs.nix;
+          pigz-fhs = call ./pkgs/pigz-fhs.nix;
+          xz-fhs = call ./pkgs/xz-fhs.nix;
+          diffutils-fhs = call ./pkgs/diffutils-fhs.nix;
+          findutils-fhs = call ./pkgs/findutils-fhs.nix;
+          gawk-fhs = call ./pkgs/gawk-fhs.nix;
+          patch-fhs = call ./pkgs/patch-fhs.nix;
+          attr-fhs = call ./pkgs/attr-fhs.nix;
+          acl-fhs = call ./pkgs/acl-fhs.nix;
+          gnugrep-fhs = call ./pkgs/gnugrep-fhs.nix;
+          file-fhs = call ./pkgs/file-fhs.nix;
+          gnutar-fhs = call ./pkgs/gnutar-fhs.nix;
+          gzip-fhs = call ./pkgs/gzip-fhs.nix;
+          ed-fhs = call ./pkgs/ed-fhs.nix;
+          bash-fhs = call ./pkgs/bash-fhs.nix;
+          gnused-fhs = call ./pkgs/gnused-fhs.nix;
+          coreutils-fhs = call ./pkgs/coreutils-fhs.nix;
+          patchelf-fhs = call ./pkgs/patchelf-fhs.nix;
+          binutils-fhs = call ./toolchain/binutils-fhs.nix;
+          bzip2-fhs = call ./pkgs/bzip2-fhs.nix;
+          gcc-fhs = call ./toolchain/gcc-fhs.nix;
+          gcc-stage2-fhs = call ./toolchain/gcc-stage2.nix;
+          glibc-rebuild-fhs = call ./toolchain/glibc-rebuild.nix;
+          bootstrap-proof-fhs = call ./proofs/bootstrap-proof.nix;
+          full-toolchain-proof-fhs = call ./proofs/full-toolchain-proof.nix;
+          circular-bootstrap-proof-fhs = call ./proofs/circular-bootstrap-proof.nix;
+          bootstrap-suite-fhs = call ./proofs/bootstrap-suite.nix;
+          bootstrap-env-fhs = call ./proofs/bootstrap-env.nix;
 
           # The union of every package above (plus the bootstrap runtime
           # layer) into one combined /usr tree. See env-fhs.nix / README.md

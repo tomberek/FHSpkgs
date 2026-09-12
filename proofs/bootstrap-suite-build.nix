@@ -23,9 +23,9 @@
 # and ${toolchain} already spliced in by the caller.
 
 let
-  gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
-  binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
-  glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
+  gccFhs = import ../toolchain/gcc-fhs.nix { inherit pkgs; };
+  binutilsFhs = import ../toolchain/binutils-fhs.nix { inherit pkgs; };
+  glibcRebuild = import ../toolchain/glibc-rebuild.nix { inherit pkgs; };
 in
 ''
   composeFullToolchain ${gccFhs} ${binutilsFhs} ${glibcRebuild}

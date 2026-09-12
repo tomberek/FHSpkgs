@@ -2,7 +2,7 @@
 
 # Only pkgs.gnused.src is used below. Genuinely trivial: no optional
 # deps, no configure flags needed.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "gnused";
   build = "buildAutotools gnused ${pkgs.gnused.src}";

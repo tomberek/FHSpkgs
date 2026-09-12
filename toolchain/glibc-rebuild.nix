@@ -23,7 +23,7 @@
 # not attempted here).
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
   # Real upstream glibc git commits between the 2.42.0 release tarball and
   # nixpkgs' current glibc pin (nixpkgs' own comment on this same file:
   # `git show --minimal --reverse glibc-2.42.. > 2.42-master.patch` --

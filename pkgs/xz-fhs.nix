@@ -3,7 +3,7 @@
 # Only pkgs.xz.src is used below -- the raw upstream tarball nixpkgs
 # already fetched and hash-verified. Genuinely trivial: no optional
 # deps, no configure flags needed.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "xz";
   build = "buildAutotools xz ${pkgs.xz.src}";

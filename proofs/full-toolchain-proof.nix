@@ -32,10 +32,10 @@
 # the identical three pieces the same way).
 
 let
-  toolchain = import ./toolchain.nix { inherit pkgs; };
-  gccFhs = import ./gcc-fhs.nix { inherit pkgs; };
-  binutilsFhs = import ./binutils-fhs.nix { inherit pkgs; };
-  glibcRebuild = import ./glibc-rebuild.nix { inherit pkgs; };
+  toolchain = import ../lib/toolchain.nix { inherit pkgs; };
+  gccFhs = import ../toolchain/gcc-fhs.nix { inherit pkgs; };
+  binutilsFhs = import ../toolchain/binutils-fhs.nix { inherit pkgs; };
+  glibcRebuild = import ../toolchain/glibc-rebuild.nix { inherit pkgs; };
 in
 pkgs.stdenv.mkDerivation {
   name = "full-toolchain-proof-fhs";

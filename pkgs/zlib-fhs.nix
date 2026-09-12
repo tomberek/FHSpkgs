@@ -5,7 +5,7 @@
 # compiled build of it) is never referenced. Everything that actually
 # builds zlib here is upstream's own, unmodified configure/make/install,
 # run by the bootstrap toolchain from toolchain.nix.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "zlib";
   build = "buildAutotools zlib ${pkgs.zlib.src}";

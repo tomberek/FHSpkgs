@@ -2,7 +2,7 @@
 
 # Only pkgs.patch.src is used below. Genuinely trivial: no optional
 # deps, no configure flags needed.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "patch";
   build = "buildAutotools patch ${pkgs.patch.src}";

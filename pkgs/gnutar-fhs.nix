@@ -8,7 +8,7 @@
 # between these two specific versions, confirmed by reading both
 # sources -- not a mechanism issue). Disabling ACL support in tar is
 # the documented, correct way around it.
-import ./mkFhsPackage.nix {
+import ../lib/mkFhsPackage.nix {
   inherit pkgs;
   name = "gnutar";
   build = "buildAutotools gnutar ${pkgs.gnutar.src} --disable-acl";
