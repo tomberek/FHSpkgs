@@ -103,22 +103,32 @@
 
           composedout="${composedOut}"
           root="$(mktemp -d)"
-          cleanup() { rm -rf "$root"; }
+          # chmod before rm: `cp -a` below preserves the Nix store's
+          # read-only modes (dirs 555, files 444) onto $root, so plain
+          # `rm -rf` fails outright on every entry ("Permission denied")
+          # even though $root itself is ours -- confirmed via a real
+          # failure. Recursively adding u+w first is what makes cleanup
+          # actually work.
+          cleanup() { chmod -R u+w "$root" 2>/dev/null; rm -rf "$root"; }
           trap cleanup EXIT
 
           mkdir -p "$root/usr" "$root/tmp" "$root/dev" "$root/bin" "$root/etc" "$root/proc" "$root/nix/store" "$root/lib64"
 
-          # Hardlink every file from the composed package's real Nix
-          # store output into the writable root, falling back to a
-          # copy on EXDEV -- same pattern used throughout this project
-          # (toolchain.nix, env-fhs.nix's unionPackage) to reuse store
-          # content without duplicating it on disk.
-          find "$composedout/usr" \( -type f -o -type l \) -print0 | while IFS= read -r -d "" f; do
-            relpath=$(printf '%s' "$f" | sed "s|^$composedout/usr/||")
-            dest="$root/usr/$relpath"
-            mkdir -p "$(dirname "$dest")"
-            ln "$f" "$dest" 2>/dev/null || cp -a "$f" "$dest"
-          done
+          # Copy the composed package's real Nix store output into the
+          # writable root in one bulk `cp -a`, not a per-file hardlink
+          # loop. An earlier per-file `ln ... || cp -a ...` loop always
+          # fell through to the `cp -a` fallback anyway -- every file
+          # under $composedout is owned by root, mode 444, and this
+          # kernel enforces protected_hardlinks, so an unprivileged
+          # hardlink to a file we don't own is rejected outright
+          # (`ln: Operation not permitted`) -- and paid for a `dirname`
+          # + `sed` + `mkdir` fork per file on top of that. Confirmed via
+          # a real timing test: the per-file loop took 30+ seconds to
+          # materialize this tree's ~3500 files (which looked like a
+          # hang under a short timeout, but wasn't one), while a single
+          # bulk `cp -a` of the same tree completes in well under a
+          # second.
+          cp -a "$composedout/usr/." "$root/usr/"
 
           ln -sf /usr/bin/bash "$root/bin/sh"
           : > "$root/dev/null"

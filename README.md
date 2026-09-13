@@ -422,6 +422,23 @@ Two real gaps this surfaced, both fixed in `mkComposedShell`:
    Also needed the same `/lib64/ld-linux-x86-64.so.2` symlink
    `lib/toolchain.nix` sets up for its own in-build chroot (gcc's raw,
    unwrapped stage-1 output defaults to that interpreter path).
+3. Materializing the scratch root originally hardlinked each file
+   individually (`find ... | while read -r f; do ln "$f" "$dest" ||
+   cp -a "$f" "$dest"; done`), mirroring `env-fhs.nix`'s own union
+   logic. But every file under a package's store output is owned by
+   `root`, mode `444`, and this kernel enforces `protected_hardlinks`
+   — an unprivileged hardlink to a file you don't own is rejected
+   outright (`ln: Operation not permitted`), so the loop *always* fell
+   through to its `cp -a` fallback, paying for a `dirname` + `sed` +
+   `mkdir` fork per file on top of that. Confirmed via a real timing
+   test: entering `fhs-shell` (a ~3500-file tree) took 30+ seconds this
+   way — long enough to look like a hang under a short timeout, though
+   it wasn't one. Fixed by replacing the per-file loop with a single
+   bulk `cp -a "$composedout/usr/." "$root/usr/"`, which copies the
+   same tree in well under a second. This does mean `$root` inherits
+   the store's read-only modes, so `cleanup()` now does `chmod -R u+w
+   "$root"` before `rm -rf` — a plain `rm -rf` on a tree of `444` files
+   fails outright even though `$root` itself is ours.
 
 ## Self-hosting proof: `toolchain/gcc-stage2.nix` — the self-built gcc compiles itself
 
